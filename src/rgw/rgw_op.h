@@ -737,6 +737,13 @@ public:
   uint32_t op_mask() override { return RGW_OP_TYPE_READ; }
 };
 
+struct SaveMaxG {
+  vector<string> marker;
+  int64_t save_max;
+};
+
+extern struct SaveMaxG saveMax_G;
+
 class RGWListBucket : public RGWOp {
 protected:
   RGWBucketEnt bucket;
@@ -749,6 +756,7 @@ protected:
   string encoding_type;
   bool list_versions;
   int max;
+  int64_t s_max;
   vector<rgw_bucket_dir_entry> objs;
   map<string, bool> common_prefixes;
 

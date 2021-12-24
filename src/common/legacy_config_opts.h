@@ -1551,6 +1551,7 @@ OPTION(rgw_crypt_s3_kms_encryption_keys, OPT_STR) // extra keys that may be used
                                                       // defined as map "key1=YmluCmJvb3N0CmJvb3N0LQ== key2=b3V0CnNyYwpUZXN0aW5nCg=="
 OPTION(rgw_crypt_suppress_logs, OPT_BOOL)   // suppress logs that might print customer key
 OPTION(rgw_list_bucket_min_readahead, OPT_INT) // minimum number of entries to read from rados for bucket listing
+OPTION(rgw_dir_count, OPT_INT)  // rgw max dir count per read from osd
 
 OPTION(rgw_rest_getusage_op_compat, OPT_BOOL) // dump description of total stats for s3 GetUsage API
 

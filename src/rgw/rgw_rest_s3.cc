@@ -3555,15 +3555,31 @@ RGWOp *RGWHandler_REST_Service_S3::op_post()
   return NULL;
 }
 
+struct SaveMaxG saveMax_G;
+
 RGWOp *RGWHandler_REST_Bucket_S3::get_obj_op(bool get_data)
 {
+  rgw_obj_key cur_marker = s->info.args.get("marker");
+  int s_max = 1;
+  if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), cur_marker.name) != saveMax_G.marker.end()) {
+    s_max = saveMax_G.save_max;
+    ldpp_dout(s, 10) << __func__ << " find marker in saveMax_G! s_max = " << s_max << dendl;
+  } else {
+    if (!cur_marker.name.empty() && cur_marker.name[cur_marker.name.size() - 1] != '/') {
+      s_max = 1000;
+      ldpp_dout(s, 10) << __func__ << " not find marker in saveMax_G! And cur_marker is not a directory, s_max = 1000" << dendl;
+    }
+    ldpp_dout(s, 10) << __func__ << " not find marker in saveMax_G! And cur_marker is a directory, s_max = 1" << dendl;
+  }
+
+
   // Non-website mode
   if (get_data) {   
     int list_type = 1;
     s->info.args.get_int("list-type", &list_type, 1);
     switch (list_type) {
       case 1:
-        return new RGWListBucket_ObjStore_S3;
+        return new RGWListBucket_ObjStore_S3(s_max);
       case 2:
         return new RGWListBucket_ObjStore_S3v2;
       default:

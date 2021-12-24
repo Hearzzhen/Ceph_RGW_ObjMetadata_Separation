@@ -7083,6 +7083,10 @@ std::vector<Option> get_rgw_options() {
     .set_default(1000)
     .set_description("Minimum number of entries to request from rados for bucket listing"),
 
+    Option("rgw_dir_count", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+    .set_default(31)
+    .set_description("Max dir count in rgw list"),
+
     Option("rgw_rest_getusage_op_compat", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
     .set_description("REST GetUsage request backward compatibility"),

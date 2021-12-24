@@ -2431,9 +2431,10 @@ int RGWRados::Bucket::List::list_objects_ordered(
 
   int count = 0;
   bool truncated = true;
-  const int64_t max = // protect against memory issues and negative vals
+  int64_t max = // protect against memory issues and negative vals
     std::min(bucket_list_objects_absolute_max, std::max(int64_t(0), max_p));
   int read_ahead = std::max(cct->_conf->rgw_list_bucket_min_readahead, max);
+  int max_items = cct->_conf->rgw_list_bucket_min_readahead;
 
   result->clear();
 
@@ -2469,6 +2470,47 @@ int RGWRados::Bucket::List::list_objects_ordered(
     }
   }
 
+  char last_ch = ' ';
+  if (cur_marker.name == params.prefix) {
+    last_ch = cur_marker.name[cur_marker.name.size() - 1];
+  } else {
+    last_ch = cur_marker.name[cur_marker.name.size() - 2];
+  }
+  //read dir or first read
+  if ((cur_marker.name.empty()) || (!cur_marker.name.empty() && last_ch == '/')) {
+    max = READ_MIN;
+    read_ahead = max;
+    save_max = max;
+    if (cur_marker.name.empty()) {
+      max_items = max;
+    } else {
+      max_items = cct->_conf->rgw_list_bucket_min_readahead;
+    }
+    ldout(cct, 20) << "max == MIN" << dendl;
+  } else if (!cur_marker.name.empty()) {
+    //read file
+    if (save_max == READ_MIN) {
+      max = READ_HUN;
+      read_ahead = max;
+      save_max = max;
+      max_items = max;
+      ldout(cct, 20) << "max == HUN" << dendl;
+    } else if (save_max == READ_HUN) {
+      max = READ_THO;
+      read_ahead = max;
+      save_max = max;
+      max_items = max;
+      ldout(cct, 20) << "max == THO" << dendl;
+    } else if (save_max == READ_THO) {
+      max = READ_TTH;
+      read_ahead = max;
+      save_max = max;
+      max_items = max;
+      ldout(cct, 20) << "max == TTH" << dendl;
+    }
+  }
+  ldout(cct, 10) << "RGWRados::" << __func__ << " max = " << max << " save_max = " << save_max << " read_ahead = " << read_ahead << dendl;
+
   // allows us to skip over entries in two conditions: 1) when using a
   // delimiter and we can skip over "subdirectories" and 2) when
   // searching for elements in the empty namespace we can skip over
@@ -2497,8 +2539,51 @@ int RGWRados::Bucket::List::list_objects_ordered(
       ldout(cct, 20) << "advancing cur_marker=" << cur_marker << dendl;
     }
 
+    if (attempt > 1) {
+      last_ch = ' ';
+      if (cur_marker.name == params.prefix) {
+        last_ch = cur_marker.name[cur_marker.name.size() - 1];
+      } else {
+        last_ch = cur_marker.name[cur_marker.name.size() - 2];
+      }
+
+      if ((cur_marker.name.empty()) || (!cur_marker.name.empty() && last_ch == '/')) {
+        max = READ_MIN;
+        read_ahead = max;
+        save_max = max;
+        max_items = cct->_conf->rgw_list_bucket_min_readahead;
+       if (attempt > cct->_conf->rgw_dir_count) {
+          max = READ_MAX;
+          read_ahead = max;
+          save_max = max;
+          max_items = max;
+          ldout(cct, 1) << "the dir is too many, set read_ahead max is 300000." << dendl;
+        }
+      } else if (!cur_marker.name.empty()) {
+        //read file
+        if (save_max == READ_MIN) {
+          max = READ_HUN;
+          read_ahead = max;
+          save_max = max;
+          max_items = max;
+        } else if (save_max == READ_HUN) {
+          max = READ_THO;
+          read_ahead = max;
+          save_max = max;
+          max_items = max;
+        } else if (save_max == READ_THO) {
+          max = READ_TTH;
+          read_ahead = max;
+          save_max = max;
+          max_items = max;
+        }
+      }
+      ldout(cct, 10) << "RGWRados::" << __func__ << " max = " << max << " save_max = " << save_max << " read_ahead = " << read_ahead << dendl;
+    }
+
+
     std::map<string, rgw_bucket_dir_entry> ent_map;
-    const size_t num_requested = read_ahead + 1 - count;
+    const size_t num_requested = read_ahead;
     int r = store->cls_bucket_list_ordered(target->get_bucket_info(),
 					   shard_id,
 					   cur_marker,
@@ -2557,7 +2642,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
         goto done;
       }
 
-      if (count < max) {
+      if (count < max_items) {
 	params.marker = index_key;
 	next_marker = index_key;
       }
@@ -2581,7 +2666,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
 
           if (common_prefixes &&
               common_prefixes->find(prefix_key) == common_prefixes->end()) {
-            if (count >= max) {
+            if (count >= max_items) {
               truncated = true;
               goto done;
             }
@@ -2603,7 +2688,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
         }
       }
 
-      if (count >= max) {
+      if (count >= max_items) {
         truncated = true;
         goto done;
       }
@@ -2619,12 +2704,12 @@ int RGWRados::Bucket::List::list_objects_ordered(
       " INFO end of outer loop, truncated=" << truncated <<
       ", count=" << count << ", attempt=" << attempt << dendl;
 
-    if (!truncated || count >= (max + 1) / 2) {
+    if (!truncated || count >= (max_items + 1) / 2) {
       // if we finished listing, or if we're returning at least half the
       // requested entries, that's enough; S3 and swift protocols allow
       // returning fewer than max entries
       break;
-    } else if (attempt > 8 && count >= 1) {
+    } else if (attempt > 50 && count >= 1) {
       // if we've made at least 8 attempts and we have some, but very
       // few, results, return with what we have
       break;

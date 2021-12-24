@@ -116,6 +116,11 @@ protected:
   public:
   RGWListBucket_ObjStore_S3() : objs_container(false) {
     default_max = 1000;
+    s_max = 1000;
+  }
+  RGWListBucket_ObjStore_S3(int _s_max) : objs_container(false) {
+    default_max = _s_max;
+    s_max = _s_max;
   }
   ~RGWListBucket_ObjStore_S3() override {}
 

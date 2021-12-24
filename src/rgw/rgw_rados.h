@@ -1797,6 +1797,7 @@ public:
 
       RGWRados::Bucket *target;
       rgw_obj_key next_marker;
+      int64_t save_max;
 
       int list_objects_ordered(int64_t max,
 			       vector<rgw_bucket_dir_entry> *result,
@@ -1808,6 +1809,13 @@ public:
 				 bool *is_truncated);
 
     public:
+      enum ReadMax {
+        READ_MIN = 1,
+        READ_HUN = 100,
+        READ_THO = 1000,
+        READ_TTH = 10000,
+        READ_MAX = 300000
+      };
 
       struct Params {
         string prefix;
@@ -1828,7 +1836,8 @@ public:
 	{}
       } params;
 
-      explicit List(RGWRados::Bucket *_target) : target(_target) {}
+      explicit List(RGWRados::Bucket *_target) : target(_target), save_max(READ_THO) {}
+      explicit List(RGWRados::Bucket *_target, int64_t _save_max) : target(_target), save_max(_save_max) {}
 
       int list_objects(int64_t max,
 		       vector<rgw_bucket_dir_entry> *result,
@@ -1844,6 +1853,9 @@ public:
       }
       rgw_obj_key& get_next_marker() {
         return next_marker;
+      }
+      int64_t get_save_max() {
+        return save_max;
       }
     }; // class List
   }; // class Bucket
