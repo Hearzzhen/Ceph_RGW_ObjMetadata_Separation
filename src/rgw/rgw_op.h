@@ -740,6 +740,8 @@ public:
 struct SaveMaxG {
   vector<string> marker;
   int64_t save_max;
+  
+  SaveMaxG() : save_max(0) {}
 };
 
 extern struct SaveMaxG saveMax_G;

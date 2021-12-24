@@ -2482,7 +2482,8 @@ int RGWRados::Bucket::List::list_objects_ordered(
     read_ahead = max;
     save_max = max;
     if (cur_marker.name.empty()) {
-      max_items = max;
+      read_ahead += 1;
+      max_items = max + 1;
     } else {
       max_items = cct->_conf->rgw_list_bucket_min_readahead;
     }
@@ -2490,11 +2491,20 @@ int RGWRados::Bucket::List::list_objects_ordered(
   } else if (!cur_marker.name.empty()) {
     //read file
     if (save_max == READ_MIN) {
-      max = READ_HUN;
-      read_ahead = max;
-      save_max = max;
-      max_items = max;
-      ldout(cct, 20) << "max == HUN" << dendl;
+      //read file or read not sure.
+      if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), cur_marker.name) != saveMax_G.marker.end()) {
+        max = READ_HUN;
+        read_ahead = max;
+        save_max = max;
+        max_items = max;
+        ldout(cct, 20) << "max == HUN" << dendl;
+      } else {
+        max = READ_MIN;
+        read_ahead = max + 1;
+        save_max = max;
+        max_items = cct->_conf->rgw_list_bucket_min_readahead;
+        ldout(cct, 20) << "read not sure, max == MIN" << dendl;
+      }
     } else if (save_max == READ_HUN) {
       max = READ_THO;
       read_ahead = max;

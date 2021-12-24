@@ -1436,6 +1436,17 @@ public:
   read directory content (bucket objects)
 */
 
+struct ListBucketInfo {
+  std::string prefix;
+  bool is_dir;
+
+  ListBucketInfo() : is_dir(true) {}
+};
+
+extern unordered_map<uint64_t, vector<ListBucketInfo>> listBucketInfo;
+
+
+
 class RGWReaddirRequest : public RGWLibRequest,
 			  public RGWListBucket /* RGWOp */
 {
@@ -1448,6 +1459,7 @@ public:
   size_t ix;
   uint32_t d_count;
   bool rcb_eof; // caller forced early stop in readdir cycle
+ // vector<struct ListBucketInfo*> listBucketInfo;
 
   RGWReaddirRequest(CephContext* _cct, RGWUserInfo *_user,
 		    RGWFileHandle* _rgw_fh, rgw_readdir_cb _rcb,
@@ -1464,6 +1476,7 @@ public:
       if (mk) {
 	marker = *mk;
       }
+      lsubdout(cct, rgw, 0) << "marker = " << marker << dendl;
     } else {
       const char* mk = get<const char*>(offset);
       if (mk) {
@@ -1472,10 +1485,36 @@ public:
 	  tmark += "/";
 	tmark += mk;
 	marker = rgw_obj_key{std::move(tmark), "", ""};
+        lsubdout(cct, rgw, 0) << "tmark = " << tmark << " mk = " << *mk << " rgw_fh->relative_object_name() = " << rgw_fh->relative_object_name() << dendl; 
+      }
+    }
+    lsubdout(cct, rgw, 0) << "marker = " << marker << dendl;
+    s_max = 1;
+    if (!marker.name.empty()) {
+      if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), marker.name) != saveMax_G.marker.end()) {
+      //find the marker in saveMax_G, it's must be a file.
+        if (saveMax_G.save_max != 0) {
+          s_max = saveMax_G.save_max;
+        }
+        lsubdout(cct, rgw, 20) << "find marker in saveMax_G! s_max = " << s_max << dendl;
+      } else {
+        //not find marker in saveMax_G
+        std::string marker_t = marker.name + "/";
+	if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), marker_t) == saveMax_G.marker.end()) {
+	  //not sure, set s_max 1.
+	  s_max = 1;
+	  lsubdout(cct, rgw, 20) << "Not find marker in saveMax_G! And cur_marker is not a directory, s_max = 1" << dendl;
+	} else {
+	  //must be a dir.
+	  s_max = 1;
+	  marker.name += "/ ";
+	  lsubdout(cct, rgw, 20) << "Not find marker in saveMax_G! And cur_marker is a directory, s_max = 1" << dendl;
+	}
       }
     }
 
-    default_max = 1000; // XXX was being omitted
+    default_max = s_max; // XXX was being omitted
+    
     op = this;
   }
 
@@ -1673,6 +1712,22 @@ public:
 
     DirIterator di{objs, common_prefixes};
 
+    if (!di.entry_is_obj()) {
+      map<string, bool>::iterator it = common_prefixes.begin();
+      vector<ListBucketInfo> listBucketInfo_v;
+      for (; it != common_prefixes.end(); it++) {
+        ListBucketInfo info;
+       info.prefix = it->first;
+       if (info.prefix[info.prefix.length() - 1] != '/') {
+         info.prefix += "/";
+       }
+        info.is_dir = true;
+       //lsubdout(cct, rgw, 0) << __func__ << " " << info.prefix << " in." << dendl;
+       listBucketInfo_v.push_back(info);
+      }
+      listBucketInfo.insert(pair<uint64_t, vector<ListBucketInfo>>((uint64_t)rgw_fh, listBucketInfo_v));
+    }
+
     for (;;) {
 
       if (di.eof()) {
@@ -1743,6 +1798,15 @@ public:
 	di.next_cp(); // and advance common_prefixes
       } /* ! di.entry_is_obj() */
     } /* for (;;) */
+    // clear the listBucketInfo
+    if (!di.entry_is_obj()) {
+      auto lsInfo_it = listBucketInfo.find((uint64_t)rgw_fh);
+      if (lsInfo_it != listBucketInfo.end()) {
+        lsubdout(cct, rgw, 10) << "RGWReaddirRequest " << __func__ << " find rgw_fh " << rgw_fh << " in listBucketInfo, erase it!" << dendl;
+        listBucketInfo.erase(lsInfo_it);
+      }
+    }
+
   }
 
   virtual void send_versioned_response() {

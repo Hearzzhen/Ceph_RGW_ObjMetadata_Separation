@@ -45,6 +45,8 @@ namespace rgw {
 
   uint32_t RGWLibFS::write_completion_interval_s = 10;
 
+  unordered_map<uint64_t, vector<ListBucketInfo>> listBucketInfo;
+
   ceph::timer<ceph::mono_clock> RGWLibFS::write_timer{
     ceph::construct_suspended};
 
@@ -204,6 +206,8 @@ namespace rgw {
 	if (type == RGW_FS_TYPE_FILE)
 	  continue;
 
+	ldout(get_context(), 10) << __func__ << " Case 1 in, so this is a directory, no need to GET it, switch to case 2, acl might be incorrect, but no affect on use. TODO it in future." << dendl;
+	break;
 	obj_path += "/";
 	RGWStatObjRequest req(cct, get_user(),
 			      parent->bucket_name(), obj_path,
@@ -236,37 +240,68 @@ namespace rgw {
       case 2:
       {
 	std::string object_name{path};
-	RGWStatLeafRequest req(cct, get_user(), parent, object_name);
-	int rc = rgwlib.get_fe()->execute_req(&req);
-	if ((rc == 0) &&
-	    (req.get_ret() == 0)) {
-	  if (req.matched) {
-	    /* we need rgw object's key name equal to file name, if
-	     * not return NULL */
-	    if ((flags & RGWFileHandle::FLAG_EXACT_MATCH) &&
-		!req.exact_matched) {
-	      lsubdout(get_context(), rgw, 15)
-	        << __func__
-		<< ": stat leaf not exact match file name = "
-		<< path << dendl;
-	      goto done;
-	    }
-	    fhr = lookup_fh(parent, path,
-			    RGWFileHandle::FLAG_CREATE|
-			    ((req.is_dir) ?
-			      RGWFileHandle::FLAG_DIRECTORY :
-			      RGWFileHandle::FLAG_NONE));
-	    /* XXX we don't have an object--in general, there need not
-	     * be one (just a path segment in some other object).  In
-	     * actual leaf an object exists, but we'd need another round
-	     * trip to get attrs */
-	    if (get<0>(fhr)) {
-	      /* for now use the parent object's mtime */
-	      RGWFileHandle* rgw_fh = get<0>(fhr);
-	      lock_guard guard(rgw_fh->mtx);
-	      rgw_fh->set_mtime(parent->get_mtime());
+	bool is_dir = false;
+        bool matched = false;
+        std::string cur_prefix = parent->relative_object_name();
+        if (cur_prefix.length() > 0)
+          cur_prefix += "/";
+        cur_prefix += path;
+        cur_prefix += "/";
+        auto lsInfo = listBucketInfo.find((uint64_t)parent);
+        if (lsInfo != listBucketInfo.end()) {
+          vector<ListBucketInfo> listBucketInfo_v = lsInfo->second;
+          for (vector<ListBucketInfo>::iterator it = listBucketInfo_v.begin(); it != listBucketInfo_v.end(); it++) {
+            //ldout(get_context(), 0) << __func__ << " common_prefixes : " << (*it).prefix << dendl;
+            if ((*it).prefix == cur_prefix) {
+              matched = true;
+              is_dir = (*it).is_dir;
+              ldout(get_context(), 10) << __func__ << " saved_prefix : " << (*it).prefix << " matched with " << " cur_prefix : " << cur_prefix << dendl;
+              break;
 	    }
 	  }
+          if (!is_dir && !matched)
+            ldout(get_context(), 10) << __func__ << " all cur_prefix are not matched with " << " cur_prefix : " << cur_prefix << dendl;
+        }
+
+        if (!is_dir) {
+          ldout(get_context(), 10) << __func__ << " case 2 in. not dir. need stat leaf it." << dendl;
+          RGWStatLeafRequest req(cct, get_user(), parent, object_name);
+          int rc = rgwlib.get_fe()->execute_req(&req);
+          if ((rc == 0) &&
+            (req.get_ret() == 0)) {
+            if (req.matched) {
+              matched = req.matched;
+              is_dir = req.is_dir;
+              /* we need rgw object's key name equal to file name, if
+               * not return NULL */
+              if ((flags & RGWFileHandle::FLAG_EXACT_MATCH) &&
+                  !req.exact_matched) {
+                lsubdout(get_context(), rgw, 15)
+                  << __func__
+                  << ": stat leaf not exact match file name = "
+                  << path << dendl;
+                goto done;
+              }
+	    }
+          }
+        }
+        if (matched) {
+          fhr = lookup_fh(parent, path,
+                          RGWFileHandle::FLAG_CREATE|
+                          (is_dir ?
+                           RGWFileHandle::FLAG_DIRECTORY :
+                           RGWFileHandle::FLAG_NONE));
+        }
+
+	/* XXX we don't have an object--in general, there need not
+	 * be one (just a path segment in some other object).  In
+	 * actual leaf an object exists, but we'd need another round
+	 * trip to get attrs */
+	if (get<0>(fhr)) {
+	  /* for now use the parent object's mtime */
+	  RGWFileHandle* rgw_fh = get<0>(fhr);
+	  lock_guard guard(rgw_fh->mtx);
+	  rgw_fh->set_mtime(parent->get_mtime());
 	}
       }
       break;
