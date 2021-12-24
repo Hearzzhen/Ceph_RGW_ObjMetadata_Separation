@@ -28,6 +28,7 @@
 #include "rgw_sync_module.h"
 #include "rgw_sync_log_trim.h"
 #include "rgw_service.h"
+#include "rgw_objmeta.h"
 
 #include "services/svc_rados.h"
 #include "services/svc_zone.h"
@@ -1170,6 +1171,7 @@ class RGWRados : public AdminSocketHook
   friend class RGWBucketReshardLock;
   friend class BucketIndexLockGuard;
   friend class RGWCompleteMultipart;
+  friend class RGW_ObjMeta;
 
   static constexpr const char* admin_commands[4][3] = {
     { "cache list",
@@ -1313,7 +1315,7 @@ public:
                pools_initialized(false),
                quota_handler(NULL),
                cr_registry(NULL),
-               meta_mgr(NULL), data_log(NULL), reshard(NULL) {}
+               meta_mgr(NULL), data_log(NULL), reshard(NULL), operateKV(NULL), obj_meta(NULL) {}
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;
@@ -1327,6 +1329,14 @@ public:
   RGWRados& set_run_gc_thread(bool _use_gc_thread) {
     use_gc_thread = _use_gc_thread;
     return *this;
+  }
+
+  RGW_ObjMeta *get_obj_meta() {
+	return obj_meta;
+  }
+
+  OperateKV *get_operateKV() {
+	return operateKV;
   }
 
   RGWRados& set_run_lc_thread(bool _use_lc_thread) {
@@ -1382,6 +1392,8 @@ public:
   RGWReshard *reshard;
   std::shared_ptr<RGWReshardWait> reshard_wait;
 
+  OperateKV *operateKV;
+  RGW_ObjMeta *obj_meta;
   virtual ~RGWRados() = default;
 
   tombstone_cache_t *get_tombstone_cache() {
@@ -1508,7 +1520,8 @@ public:
     void invalidate_state();
 
     int prepare_atomic_modification(librados::ObjectWriteOperation& op, bool reset_obj, const string *ptag,
-                                    const char *ifmatch, const char *ifnomatch, bool removal_op, bool modify_tail);
+                                    const char *ifmatch, const char *ifnomatch, bool removal_op, bool modify_tail, 
+									RGW_ObjMeta *obj_meta = NULL, bool need_put_to_kv = false);
     int complete_atomic_modification();
 
   public:
@@ -1624,9 +1637,9 @@ public:
       int _do_write_meta(uint64_t size, uint64_t accounted_size,
                      map<std::string, bufferlist>& attrs,
                      bool modify_tail, bool assume_noent,
-                     void *index_op);
+                     void *index_op, bool need_put_to_kv = false);
       int write_meta(uint64_t size, uint64_t accounted_size,
-                     map<std::string, bufferlist>& attrs);
+                     map<std::string, bufferlist>& attrs, bool need_put_to_kv = false);
       int write_data(const char *data, uint64_t ofs, uint64_t len, bool exclusive);
       const req_state* get_req_state() {
         return (req_state *)target->get_ctx().get_private();
@@ -1778,7 +1791,7 @@ public:
                    const string& etag, const string& content_type,
                    const string& storage_class,
                    bufferlist *acl_bl, RGWObjCategory category,
-		   list<rgw_obj_index_key> *remove_objs, const string *user_data = nullptr, bool appendable = false);
+		   list<rgw_obj_index_key> *remove_objs, const string *user_data = nullptr, bool appendable = false, RGW_ObjMeta *obj_meta = NULL);
       int complete_del(int64_t poolid, uint64_t epoch,
                        ceph::real_time& removed_mtime, /* mtime of removed object */
                        list<rgw_obj_index_key> *remove_objs);
@@ -2214,11 +2227,12 @@ public:
   int put_linked_bucket_info(RGWBucketInfo& info, bool exclusive, ceph::real_time mtime, obj_version *pep_objv,
 			     map<string, bufferlist> *pattrs, bool create_entry_point);
 
+  int set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent, string& tag, uint16_t flags);
   int cls_obj_prepare_op(BucketShard& bs, RGWModifyOp op, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModifyOp op, string& tag, int64_t pool, uint64_t epoch,
-                          rgw_bucket_dir_entry& ent, RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
+                          rgw_bucket_dir_entry& ent, RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr);
   int cls_obj_complete_add(BucketShard& bs, const rgw_obj& obj, string& tag, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent,
-                           RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
+                           RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr,						   RGW_ObjMeta *obj_meta = nullptr);
   int cls_obj_complete_del(BucketShard& bs, string& tag, int64_t pool, uint64_t epoch, rgw_obj& obj,
                            ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);

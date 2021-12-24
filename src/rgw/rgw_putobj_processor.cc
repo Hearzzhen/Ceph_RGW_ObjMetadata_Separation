@@ -281,6 +281,7 @@ int AtomicObjectProcessor::complete(size_t accounted_size,
                                     rgw_zone_set *zones_trace,
                                     bool *pcanceled)
 {
+  ldout(store->ctx(), 1) << "AtomicObjectProcessor::complete in! " << dendl;
   int r = writer.drain();
   if (r < 0) {
     return r;
@@ -315,7 +316,7 @@ int AtomicObjectProcessor::complete(size_t accounted_size,
   obj_op.meta.zones_trace = zones_trace;
   obj_op.meta.modify_tail = true;
 
-  r = obj_op.write_meta(actual_size, accounted_size, attrs);
+  r = obj_op.write_meta(actual_size, accounted_size, attrs, true);
   if (r < 0) {
     return r;
   }
@@ -416,6 +417,7 @@ int MultipartObjectProcessor::complete(size_t accounted_size,
                                        rgw_zone_set *zones_trace,
                                        bool *pcanceled)
 {
+  ldout(store->ctx(), 1) << "MultipartObjectProcessor::complete in!" << dendl;
   int r = writer.drain();
   if (r < 0) {
     return r;
@@ -600,6 +602,7 @@ int AppendObjectProcessor::complete(size_t accounted_size, const string &etag, c
                                     ceph::real_time delete_at, const char *if_match, const char *if_nomatch,
                                     const string *user_data, rgw_zone_set *zones_trace, bool *pcanceled)
 {
+  ldout(store->ctx(), 1) << "AppendObjectProcessor::complete in!" << dendl;
   int r = writer.drain();
   if (r < 0)
     return r;
