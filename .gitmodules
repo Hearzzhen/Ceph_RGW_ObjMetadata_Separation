@@ -61,3 +61,6 @@
 [submodule "src/spawn"]
 	path = src/spawn
 	url = git://github.com/ceph/spawn.git
+[submodule "src/tikv-clientgo"]
+	path = src/tikv-clientgo
+	url = git@github.com:Hearzzhen/tikv-clientgo-cgo.git
