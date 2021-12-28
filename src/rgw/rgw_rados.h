@@ -29,6 +29,7 @@
 #include "rgw_sync_log_trim.h"
 #include "rgw_service.h"
 #include "rgw_objmeta.h"
+#include "rgw_objmeta_cache.h"
 
 #include "services/svc_rados.h"
 #include "services/svc_zone.h"
@@ -51,6 +52,7 @@ class RGWReshard;
 class RGWReshardWait;
 
 class RGWSysObjectCtx;
+class ObjMetaCache;
 
 /* flags for put_obj_meta() */
 #define PUT_OBJ_CREATE      0x01
@@ -1302,6 +1304,7 @@ protected:
   RGWIndexCompletionManager *index_completion_manager{nullptr};
 
   bool use_cache{false};
+  bool use_obj_meta_cache{false};
 public:
   RGWRados(): lock("rados_timer_lock"), timer(NULL),
                gc(NULL), lc(NULL), obj_expirer(NULL), use_gc_thread(false), use_lc_thread(false), quota_threads(false),
@@ -1315,11 +1318,16 @@ public:
                pools_initialized(false),
                quota_handler(NULL),
                cr_registry(NULL),
-               meta_mgr(NULL), data_log(NULL), reshard(NULL), operateKV(NULL), obj_meta(NULL) {}
+               meta_mgr(NULL), data_log(NULL), reshard(NULL), operateKV(NULL), obj_meta(NULL), obj_meta_cache(NULL) {}
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;
     return *this;
+  }
+
+  RGWRados& set_use_obj_meta_cache(bool status) {
+	use_obj_meta_cache = status;
+	return *this;
   }
 
   RGWLC *get_lc() {
@@ -1394,6 +1402,8 @@ public:
 
   OperateKV *operateKV;
   RGW_ObjMeta *obj_meta;
+  ObjMetaCache *obj_meta_cache;
+
   virtual ~RGWRados() = default;
 
   tombstone_cache_t *get_tombstone_cache() {
@@ -1439,6 +1449,7 @@ public:
   int init_complete();
   int initialize();
   void finalize();
+  void init_obj_meta_cache(bool enabled);
 
   int register_to_service_map(const string& daemon_type, const map<string, string>& meta);
   int update_service_map(std::map<std::string, std::string>&& status);
@@ -2512,16 +2523,16 @@ class RGWStoreManager {
 public:
   RGWStoreManager() {}
   static RGWRados *get_storage(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads,
-			       bool run_sync_thread, bool run_reshard_thread, bool use_cache = true) {
+			       bool run_sync_thread, bool run_reshard_thread, bool use_cache = true, bool use_obj_meta_cache = false) {
     RGWRados *store = init_storage_provider(cct, use_gc_thread, use_lc_thread, quota_threads, run_sync_thread,
-					    run_reshard_thread, use_cache);
+					    run_reshard_thread, use_cache, use_obj_meta_cache);
     return store;
   }
   static RGWRados *get_raw_storage(CephContext *cct) {
     RGWRados *store = init_raw_storage_provider(cct);
     return store;
   }
-  static RGWRados *init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metadata_cache);
+  static RGWRados *init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metadata_cache, bool use_obj_meta_cache);
   static RGWRados *init_raw_storage_provider(CephContext *cct);
   static void close_storage(RGWRados *store);
 

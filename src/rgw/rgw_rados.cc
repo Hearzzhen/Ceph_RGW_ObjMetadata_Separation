@@ -1367,6 +1367,9 @@ void RGWRados::finalize()
     reshard_wait.reset();
   }
 
+  if (use_obj_meta_cache) {
+    delete obj_meta_cache;
+  }
   delete obj_meta;
   operateKV->stop();
   delete operateKV;
@@ -1663,6 +1666,12 @@ int RGWRados::init_svc(bool raw)
   return svc.init(cct, use_cache);
 }
 
+void RGWRados::init_obj_meta_cache(bool enabled) 
+{
+  obj_meta_cache = new ObjMetaCache;
+  obj_meta_cache->set_ctx(cct);
+  obj_meta_cache->set_enabled(enabled);
+}
 /** 
  * Initialize the RADOS instance and prepare to do other ops
  * Returns 0 on success, -ERR# on failure.
@@ -1681,6 +1690,9 @@ int RGWRados::initialize()
     return ret;
   }
 
+  if (use_obj_meta_cache) {
+    init_obj_meta_cache(true);
+  }
   host_id = svc.zone_utils->gen_host_id();
 
   ret = init_rados();
@@ -8255,24 +8267,63 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
   struct timespec mtime_ts;
 
   ObjectReadOperation op;
+  int res = -ENOENT;
   if (objv_tracker) {
     objv_tracker->prepare_op_for_read(&op);
   }
   if (attrs) {
 	if (from_tikv) {
-	  ldout(cct, 10) << "Read xattr from tikv for oid: " << obj.oid << dendl;
+      ObjMetaCacheInfo info;
 	  string robj_name = "/" + robj.bucket.name + "/" + robj.key.name;
-	  unfiltered_attrset = operateKV->getKV(robj_name);
-	  if (unfiltered_attrset.empty()) {
-		ldout(cct, 10) << "Cannot find any data in tikv! Turn to osd to find!" << dendl;
-		op.getxattrs(&unfiltered_attrset, NULL);
+	  if (use_obj_meta_cache) {
+		ceph_assert(obj_meta_cache);
+	    res = obj_meta_cache->get(robj_name, info);
+	  }
+	  if (res == -ENOENT) {
+		if (!use_obj_meta_cache) {
+		  ldout(cct, 10) << "obj_meta_cache has not enabled!" << dendl;
+		} else {
+	      ldout(cct, 10) << "Read xattr in obj_meta_cache has no found! Turn to get in tikv for oid: " << obj.oid << dendl;
+		}
+	    unfiltered_attrset = operateKV->getKV(robj_name);
+	    if (unfiltered_attrset.empty()) {
+		  ldout(cct, 10) << "Cannot find any data in tikv! Turn to osd to find!" << dendl;
+		  op.getxattrs(&unfiltered_attrset, NULL);
+	    }
+	  } else if (res == 0) {
+		for (auto &it : info.objmeta_kv) {
+		  if (it.first == robj_name) {
+			decode(unfiltered_attrset, it.second);
+		  }
+		}
+#if 0
+		ldout(cct, 0) << "test get lru decode: " << dendl;
+		map<string, bufferlist> m2 = unfiltered_attrset;
+		for (auto &p : m2) {
+		  ldout(cct, 0) << p.first << dendl;
+		  if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
+		    string t = p.second.to_str();
+			ldout(cct, 0) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
+		  }
+		  if (p.first == "omapvals") {
+			obj_omap oo_1;
+			decode(oo_1, p.second);
+			ldout(cct, 0) << "when omapvals mtime = " << oo_1.meta.mtime << dendl;
+		  }
+		}
+#endif
+		if (psize || pmtime) {
+		  size = info.size;
+		  *pmtime = info.mtime; //TODO: handle in no cache!!!
+		  ldout(cct, 0) << "get psize = " << size << " pmtime = " <<*pmtime << dendl;
+		}
 	  }
 	} else {
-	  ldout(cct, 10) << "Read xattr from osd for osd: " << obj.oid << dendl;
+	  ldout(cct, 10) << "Read xattr from osd for oid: " << obj.oid << dendl;
       op.getxattrs(&unfiltered_attrset, NULL);
 	}
   }
-  if (psize || pmtime) {
+  if ((psize || pmtime) && (res != 0)) {
     op.stat2(&size, &mtime_ts, NULL);
   }
   if (first_chunk) {
@@ -8290,12 +8341,22 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 
   if (psize)
     *psize = size;
-  if (pmtime)
+  if (pmtime && (res != 0))
     *pmtime = ceph::real_clock::from_timespec(mtime_ts);
   if (attrs) {
     rgw_filter_attrset(unfiltered_attrset, RGW_ATTR_PREFIX, attrs);
   }
 
+  if (use_obj_meta_cache && res != 0) {
+	string absolute_name = "/" + robj.bucket.name + "/" + robj.key.name;
+	ldout(cct, 10) << "use the object meta cache, but lru not found: " << absolute_name << "! adding to lru list!" << dendl;
+	ceph_assert(obj_meta_cache);
+    ObjMetaCacheInfo putInfo;
+	putInfo.objmeta_kv = *attrs;
+	putInfo.size = *psize;
+	putInfo.mtime = *pmtime;
+	obj_meta_cache->put(absolute_name, putInfo);
+  }
   return 0;
 }
 
@@ -9443,6 +9504,15 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
 	  obj_meta->insert_to_kv(absolute_name, bl);
 	  operateKV->queue(obj_meta->get_objmeta_kv());
+
+	  if (use_obj_meta_cache) {
+		ceph_assert(obj_meta_cache);
+	    ObjMetaCacheInfo info;
+	    info.objmeta_kv = obj_meta->get_objmeta_kv();
+	    info.size = ent.meta.size;
+	    info.mtime = ent.meta.mtime;
+	    obj_meta_cache->put(absolute_name, info);
+	  }
     }
   }
   complete_op_data *arg;
@@ -9508,7 +9578,7 @@ int RGWRados::set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoc
   ldout(cct, 0) << "test decode omap: " << dendl;
   obj_omap oo_1;
   decode(oo_1, bl);
-  ldout(cct, 0) << "oo_1.name: " << oo_1.name << " oo_1.epoch: " << oo_1.epoch << dendl;
+  ldout(cct, 0) << "oo_1.name: " << oo_1.name << " oo_1.meta.mtime: " << oo_1.meta.mtime << dendl;
 #endif
   return 0;
 }
@@ -10590,11 +10660,12 @@ uint64_t RGWRados::next_bucket_id()
 }
 
 RGWRados *RGWStoreManager::init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread,
-						 bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_cache)
+						 bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_cache, bool use_obj_meta_cache)
 {
   RGWRados *store = new RGWRados;
 
   if ((*store).set_use_cache(use_cache)
+			  .set_use_obj_meta_cache(use_obj_meta_cache)
               .set_run_gc_thread(use_gc_thread)
               .set_run_lc_thread(use_lc_thread)
               .set_run_quota_threads(quota_threads)
