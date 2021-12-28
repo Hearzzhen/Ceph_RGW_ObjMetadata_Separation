@@ -1500,9 +1500,11 @@ int RGWRados::init_complete()
 
   pools_initialized = true;
 
-  operateKV = new OperateKV(cct);
+  ldout(cct, 0) << "ready to init OperateKV! cct->_conf->rgw_tikv_library_path = " << cct->_conf->rgw_tikv_library_path << dendl;
+  operateKV = new OperateKV(cct->_conf->rgw_tikv_library_path, cct);
   operateKV->start();
   obj_meta = new RGW_ObjMeta(cct); 
+  ldout(cct, 0) << "init OperateKV finish!" << dendl;
 
   gc = new RGWGC();
   gc->initialize(cct, this);
@@ -3718,7 +3720,11 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   RGWRados::Bucket::UpdateIndex *index_op = static_cast<RGWRados::Bucket::UpdateIndex *>(_index_op);
   RGWRados *store = target->get_store();
 
-  RGW_ObjMeta *obj_meta = store->get_obj_meta();
+  RGW_ObjMeta *obj_meta = nullptr;
+  if (need_put_to_kv) {
+    obj_meta = store->get_obj_meta();
+  }
+
   ObjectWriteOperation op;
 #ifdef WITH_LTTNG
   const struct req_state* s =  get_req_state();
@@ -3775,6 +3781,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
       obj_retention.encode(bl);
       op.setxattr(RGW_ATTR_OBJECT_RETENTION, bl);
 	  if (need_put_to_kv) {
+		ceph_assert(obj_meta);
 		obj_meta->insert_to_metamap("user.rgw.object-retention", bl);
 		ldout(store->ctx(), 0) << "obj_meta set user.rgw.object-retention" << dendl;
 	  }
@@ -3784,6 +3791,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   if (state->is_olh) {
     op.setxattr(RGW_ATTR_OLH_ID_TAG, state->olh_tag);
 	if (need_put_to_kv) {
+	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap("user.rgw.olh.idtag", state->olh_tag);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.olh.idtag" << dendl;
 	}
@@ -3823,6 +3831,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
     encode(*meta.manifest, bl);
     op.setxattr(RGW_ATTR_MANIFEST, bl);
 	if (need_put_to_kv) {
+	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap("user.rgw.manifest", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.manifest" << dendl;
 	}
@@ -3837,6 +3846,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
 
     op.setxattr(name.c_str(), bl);
 	if (need_put_to_kv) {
+	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap(name, bl);
 	  ldout(store->ctx(), 0) << "obj_meta set " << name << dendl;
 	}
@@ -3858,6 +3868,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
     encode(store->svc.zone->get_zone_short_id(), bl);
     op.setxattr(RGW_ATTR_SOURCE_ZONE, bl);
 	if (need_put_to_kv) {
+	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap("user.rgw.source_zone", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.source_zone" << dendl;
 	}
@@ -3868,6 +3879,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
     bl.append(storage_class);
     op.setxattr(RGW_ATTR_STORAGE_CLASS, bl);
 	if (need_put_to_kv) {
+	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap("user.rgw.storage_class", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.storage_class" << dendl;
 	}
@@ -6052,7 +6064,7 @@ int RGWRados::get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket
   int r = -ENOENT;
 
   if (!assume_noent) {
-    r = RGWRados::raw_obj_stat(raw_obj, &s->size, &s->mtime, &s->epoch, &s->attrset, (s->prefetch_data ? &s->data : NULL), NULL);
+    r = RGWRados::raw_obj_stat(raw_obj, &s->size, &s->mtime, &s->epoch, &s->attrset, (s->prefetch_data ? &s->data : NULL), NULL, obj, true);
   }
 
   if (r == -ENOENT) {
@@ -6450,12 +6462,14 @@ int RGWRados::Object::prepare_atomic_modification(ObjectWriteOperation& op, bool
 
   op.setxattr(RGW_ATTR_ID_TAG, bl);
   if (need_put_to_kv) {
+	ceph_assert(obj_meta);
     obj_meta->insert_to_metamap("user.rgw.idtag", bl);
 	ldout(store->ctx(), 0) << "obj_meta set user.rgw.idtag" << dendl;
   }
   if (modify_tail) {
     op.setxattr(RGW_ATTR_TAIL_TAG, bl);
 	if (need_put_to_kv) {
+	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap("user.rgw.tail_tag", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.tail_tag" << dendl;
 	}
@@ -8228,7 +8242,7 @@ int RGWRados::follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx
 
 int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime, uint64_t *epoch,
                            map<string, bufferlist> *attrs, bufferlist *first_chunk,
-                           RGWObjVersionTracker *objv_tracker)
+                           RGWObjVersionTracker *objv_tracker, const rgw_obj& robj, bool from_tikv)
 {
   rgw_rados_ref ref;
   int r = get_raw_obj_ref(obj, &ref);
@@ -8245,7 +8259,18 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
     objv_tracker->prepare_op_for_read(&op);
   }
   if (attrs) {
-    op.getxattrs(&unfiltered_attrset, NULL);
+	if (from_tikv) {
+	  ldout(cct, 10) << "Read xattr from tikv for oid: " << obj.oid << dendl;
+	  string robj_name = "/" + robj.bucket.name + "/" + robj.key.name;
+	  unfiltered_attrset = operateKV->getKV(robj_name);
+	  if (unfiltered_attrset.empty()) {
+		ldout(cct, 10) << "Cannot find any data in tikv! Turn to osd to find!" << dendl;
+		op.getxattrs(&unfiltered_attrset, NULL);
+	  }
+	} else {
+	  ldout(cct, 10) << "Read xattr from osd for osd: " << obj.oid << dendl;
+      op.getxattrs(&unfiltered_attrset, NULL);
+	}
   }
   if (psize || pmtime) {
     op.stat2(&size, &mtime_ts, NULL);
@@ -9392,10 +9417,11 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   //ldout(cct, 0) << "pending_map: " <<  << dendl;
   //ldout(cct, 0) << "versioned_epoch: " << << dendl;
 #endif
-  int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags);
-  if (r == 0) {
-	bufferlist bl;
-	encode(obj_meta->get_combine_meta(), bl);
+  if (obj_meta) {
+    int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags);
+    if (r == 0) {
+	  bufferlist bl;
+	  encode(obj_meta->get_combine_meta(), bl);
 #if 0
 	map<string, bufferlist> m1 = obj_meta->get_combine_meta();
 	ldout(cct, 0) << "test assignmemt: " << dendl;
@@ -9414,9 +9440,10 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  }
 	}
 #endif
-	string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
-	obj_meta->insert_to_kv(absolute_name, bl);
-	operateKV->queue(obj_meta->get_objmeta_kv());
+	  string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
+	  obj_meta->insert_to_kv(absolute_name, bl);
+	  operateKV->queue(obj_meta->get_objmeta_kv());
+    }
   }
   complete_op_data *arg;
   index_completion_manager->create_completion(obj, op, tag, ver, key, dir_meta, remove_objs,

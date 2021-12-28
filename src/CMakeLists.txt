@@ -261,6 +261,10 @@ if (WITH_BLKIN)
   add_subdirectory(blkin/blkin-lib)
 endif(WITH_BLKIN)
 
+if (WITH_RADOSGW_TIKV_CLIENTGO)
+  add_subdirectory(tikv-clientgo/implements/txnkv)
+endif(WITH_RADOSGW_TIKV_CLIENTGO)
+
 # Common infrastructure
 configure_file(
   ${CMAKE_SOURCE_DIR}/src/ceph_ver.h.in.cmake
@@ -393,11 +397,12 @@ if(WITH_DPDK)
   list(APPEND ceph_common_deps common_async_dpdk)
 endif()
 
+set(LIB_TXNKV ${CMAKE_BINARY_DIR}/lib/libtxnkv.so)
 add_library(common STATIC ${ceph_common_objs})
 target_link_libraries(common ${ceph_common_deps})
 
 add_library(ceph-common SHARED ${ceph_common_objs})
-target_link_libraries(ceph-common ${ceph_common_deps})
+target_link_libraries(ceph-common ${ceph_common_deps} ${LIB_TXNKV})
 # appease dpkg-shlibdeps
 set_target_properties(ceph-common PROPERTIES
   SOVERSION 0
@@ -727,6 +732,9 @@ if(WITH_RADOSGW)
     endif()
   endif(OPENSSL_FOUND)
   add_subdirectory(rgw)
+  if (WITH_RADOSGW_TIKV_CLIENTGO)
+    add_subdirectory(tikv-clientgo)
+  endif(WITH_RADOSGW_TIKV_CLIENTGO)
 
 endif(WITH_RADOSGW)
 

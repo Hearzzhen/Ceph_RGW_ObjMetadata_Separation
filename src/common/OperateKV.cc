@@ -78,9 +78,47 @@ vector<string> OperateKV::extract(string& input) {
   return res;
 }
 
+std::string OperateKV::replaceAllword(const std::string& resources, const string& key, const std::string& ReplaceKey)
+{
+  size_t pos = 0;
+  std::string temp = resources;
+  while((pos = temp.find(key,pos)) != string::npos)
+  {
+    temp.erase(pos, key.size()); // delete origin string 
+    temp.insert(pos, ReplaceKey); // insert replace string
+    pos += ReplaceKey.size(); // update start position
+  }
+  return temp;
+}
+
 bool OperateKV::has_inserted(std::string head_str) {
   //TODO
   return false;
+}
+
+map<string, bufferlist> OperateKV::getKV(const std::string& obj_name) {
+  map<string, bufferlist> meta_map;
+  string convert_obj_name;
+  size_t position = obj_name.rfind("/");
+  if (position == obj_name.length() - 1) {
+	string tmp_name = obj_name.substr(0, position);
+	position = tmp_name.rfind("/");
+	string pre_str = tmp_name.substr(0, position + 1);
+	string post_str = tmp_name.substr(position + 1, tmp_name.length() - 1);
+	convert_obj_name = pre_str + "." + post_str + "/";
+  } else {
+	string pre_str = obj_name.substr(0, position + 1);
+	string post_str = obj_name.substr(position + 1, obj_name.length() - 1);
+	convert_obj_name = pre_str + "." + post_str;
+  }
+  struct KV_s kv_s;
+  kv_s = tikvClientOperate->Get(convert_obj_name);
+  if (kv_s.v != "") {
+    bufferlist out;
+    out.append(kv_s.v);
+    decode(meta_map, out);
+  }
+  return meta_map;
 }
 
 void *OperateKV::operateKV_thread_entry() {
@@ -101,7 +139,7 @@ void *OperateKV::operateKV_thread_entry() {
 		string obj_name = iter->first;
 		vector<string> extract_res;
 		extract_res = extract(obj_name);
-#if 1
+#if 0
 		ldout(cct, 10) << "print extract_res: " << dendl;
 		for (auto &i : extract_res) {
 		  ldout(cct, 10) << i << dendl;
@@ -115,7 +153,7 @@ void *OperateKV::operateKV_thread_entry() {
 		  if (_str[_str.length() - 1] == '-') {
 			map<string, string> args;
 			args.emplace(pair<string, string>(_str, "head"));
-		//	tikvClientOperate.Puts(args);
+			tikvClientOperate->Puts(args);
 			ldout(cct, 10) << "put head." << dendl;
 			for (auto &i : args) {
 			  ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
@@ -124,19 +162,36 @@ void *OperateKV::operateKV_thread_entry() {
 			map<string, string> args;
 			args.emplace(pair<string, string>(_str, "tail"));
 			ldout(cct, 10) << "put tail." << dendl;
-		//	tikvClientOperate.Puts(args);
+			tikvClientOperate->Puts(args);
 			for (auto &i : args) {
 			  ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
 			}
 		  } else {
 			map<std::string, bufferlist> args;
+			map<std::string, std::string> args1;
 			for (auto &i : p) {
 			  //TODO
 			  string m_name = _str;
+			  string b_to_s = string(i.second.to_str());
+			  args1.emplace(pair<string, string>(m_name, b_to_s));
+#if 0
+			  ldout(cct, 10) << "test decode: before PUTS:" << dendl;
+			  bufferlist outs;
+			  outs.append(b_to_s);
+			  map<std::string, bufferlist> mmm;
+			  decode(mmm, outs);
+			  for (auto &p : mmm) {
+				ldout(cct, 10) << p.first << dendl;
+				if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
+				  string t = p.second.to_str();
+				  ldout(cct, 10) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
+				}
+			  }
+#endif
 			  args.emplace(pair<string, bufferlist>(m_name, i.second));
 			}
 			ldout(cct, 10) << "put objmeta!" << dendl;
-		//	tikvClientOperate.Puts(args); //need increase the tikv Puts interface
+			tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
 			for (auto &i : args) {
 			  ldout(cct, 10) << "key = " << i.first << dendl;//" val = " << i.second << dendl;
 			  map<string, bufferlist> m1;
@@ -159,6 +214,41 @@ void *OperateKV::operateKV_thread_entry() {
 		  }
 		}
 	  }
+#if 0
+		ldout(cct, 10) << "test get and decode: " << dendl;
+		for (auto p : ls) {
+		  map<std::string, bufferlist>::iterator iter = p.begin();
+		  string obj_name = iter->first;
+		  size_t position = obj_name.rfind("/");
+		  string pre_str = obj_name.substr(0, position + 1);
+		  string post_str = obj_name.substr(position + 1, obj_name.length() - 1);
+		  string final_name_head = pre_str + "-";
+		  string final_name = pre_str + "." + post_str;
+		  string final_name_tail = pre_str + "~";
+		  struct KV_s kv_s1;
+		  struct KV_s kv_s2;
+		  struct KV_s kv_s3;
+		  kv_s1 = tikvClientOperate->Get(final_name_head);
+		  ldout(cct, 10) << "Get key= " << kv_s1.k << " val= " << kv_s1.v << dendl;
+		  kv_s2 = tikvClientOperate->Get(final_name_tail);
+		  ldout(cct, 10) << "Get key= " << kv_s2.k << " val= " << kv_s2.v << dendl;
+		  kv_s3 = tikvClientOperate->Get(final_name);
+		  ldout(cct, 10) << "Get key= " << kv_s3.k << ": " << dendl;
+		  bufferlist out;
+		  out.append(kv_s3.v);
+
+		  map<string, bufferlist> m2;
+	   	  decode(m2, out);
+		  for (auto &p : m2) {
+		    ldout(cct, 10) << p.first << dendl;
+		    if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
+		      string t = p.second.to_str();
+		      ldout(cct, 10) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
+		    }
+		  }
+		}
+#endif
+	  
 	  ldout(cct, 10) << "operateKV_thread done with " << ls << dendl;
 	  ls.clear();
 	  ul.lock();

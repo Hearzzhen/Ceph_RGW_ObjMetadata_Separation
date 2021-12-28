@@ -5,8 +5,13 @@
 #include "common/Thread.h"
 #include "common/ceph_mutex.h"
 #include "common/Cond.h"
+#include "common/txnkv.h"
 
 class CephContext;
+
+#define dout_subsys ceph_subsys_operateKV
+#undef dout_prefix
+#define dout_prefix *_dout << "operateKV "
 
 class OperateKV {
 private:
@@ -15,6 +20,7 @@ private:
   ceph::condition_variable operateKV_cond;
   ceph::condition_variable operateKV_empty_cond;
   vector<map<std::string, bufferlist>> operateKV_queue;
+  TikvClientOperate *tikvClientOperate;
 
   string thread_name;
 
@@ -30,6 +36,7 @@ private:
     void* entry() override { return op_kv->operateKV_thread_entry(); }
   } operateKV_thread;
 
+  string library_path;
 public:
   void queue(map<std::string, bufferlist>& m) {
     std::unique_lock ul(operateKV_lock);
@@ -45,16 +52,28 @@ public:
 
   void wait_for_empty();
 
-  explicit OperateKV(CephContext *cct_) :
-    cct(cct_), operateKV_lock("OperateKV::operateKV_lock"), thread_name("operateKV"),
-	operateKV_stop(false), operateKV_running(false), operateKV_empty_wait(false), operateKV_thread(this) {}
+  explicit OperateKV(const string& _library_path, CephContext *_cct) :
+    cct(_cct), operateKV_lock("OperateKV::operateKV_lock"), thread_name("operateKV"),
+	operateKV_stop(false), operateKV_running(false), operateKV_empty_wait(false), operateKV_thread(this), library_path(_library_path) {
+	  tikvClientOperate = new TikvClientOperate(_cct, library_path);
+	  string pd_addr = "10.1.172.118:2379";
+	  tikvClientOperate->initTikvClientOperate(pd_addr);
+	}
 
-  ~OperateKV() {}
+  ~OperateKV() {
+    if (tikvClientOperate) {
+	  delete tikvClientOperate;
+	  tikvClientOperate = NULL;
+    }
+  }
 
   void handle_str(std::string& input, vector<string>& result, bool has_flag);
   void recursive(std::string& input, int nums, int count, vector<string>& result, bool has_flag);
   vector<string> extract(std::string& input);
   bool has_inserted(std::string head_str);
+  std::string replaceAllword(const std::string& resources, const string& key, const std::string& ReplaceKey);
+  map<string, bufferlist> getKV(const std::string& obj_name);
 };
 
+#undef dout_subsys
 #endif

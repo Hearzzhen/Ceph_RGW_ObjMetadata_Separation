@@ -268,6 +268,7 @@ if(WITH_BOOST_CONTEXT)
   target_link_libraries(radosgw_a PUBLIC spawn)
 endif()
 
+#set(LIB_TXNKV ${CMAKE_BINARY_DIR}/lib/libtxnkv.so)
 add_executable(radosgw rgw_main.cc)
 target_link_libraries(radosgw radosgw_a librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
@@ -276,7 +277,7 @@ target_link_libraries(radosgw radosgw_a librados
   global dmclock::dmclock
   ${FCGI_LIBRARY} ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
-  ${ALLOC_LIBS})
+  ${ALLOC_LIBS} ${LIB_TXNKV})
 install(TARGETS radosgw DESTINATION bin)
 
 set(radosgw_admin_srcs
@@ -288,7 +289,7 @@ target_link_libraries(radosgw-admin ${rgw_libs} librados
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
   global ${FCGI_LIBRARY} ${LIB_RESOLV}
-  ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES})
+  ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES} ${LIB_TXNKV})
 install(TARGETS radosgw-admin DESTINATION bin)
 
 set(radosgw_es_srcs

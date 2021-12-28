@@ -7087,6 +7087,14 @@ std::vector<Option> get_rgw_options() {
     .set_default(31)
     .set_description("Max dir count in rgw list"),
 
+	Option("rgw_enable_tikv", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+	.set_default(true)
+    .set_description("enable the rgw metadata separate"),
+
+	Option("rgw_tikv_library_path", Option::TYPE_STR, Option::LEVEL_ADVANCED)
+	.set_default("/usr/lib64/libtxnkv.so")
+	.set_description("when rgw_enable_tikv true, this is a tikv-clientgo shared library path"),
+
     Option("rgw_rest_getusage_op_compat", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
     .set_description("REST GetUsage request backward compatibility"),
