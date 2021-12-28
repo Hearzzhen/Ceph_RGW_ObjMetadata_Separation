@@ -1506,6 +1506,7 @@ int RGWRados::init_complete()
   ldout(cct, 0) << "ready to init OperateKV! cct->_conf->rgw_tikv_library_path = " << cct->_conf->rgw_tikv_library_path << dendl;
   operateKV = new OperateKV(cct->_conf->rgw_tikv_library_path, cct);
   operateKV->start();
+  
   obj_meta = new RGW_ObjMeta(cct); 
   ldout(cct, 0) << "init OperateKV finish!" << dendl;
 
@@ -8262,6 +8263,12 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
     return r;
   }
 
+  //temporary circumvention plan
+  ldout(cct, 10) << "obj pool = " << obj.pool.name << dendl;
+  if (obj.pool.name.find("non-ec") != string::npos || 0 == obj.oid.compare(obj.oid.length() - 5, 5, ".meta")) {
+	from_tikv = false;
+  }
+
   map<string, bufferlist> unfiltered_attrset;
   uint64_t size = 0;
   struct timespec mtime_ts;
@@ -8273,6 +8280,7 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
   }
   if (attrs) {
 	if (from_tikv) {
+	  //ignore: "Bucket1:_multipart_dir10/librgw.so.2.0.0.2~0r3JvYfwgUL_zCGAJ_vIyNDZtVexnhe.meta"
       ObjMetaCacheInfo info;
 	  string robj_name = "/" + robj.bucket.name + "/" + robj.key.name;
 	  if (use_obj_meta_cache) {
@@ -8347,7 +8355,7 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
     rgw_filter_attrset(unfiltered_attrset, RGW_ATTR_PREFIX, attrs);
   }
 
-  if (use_obj_meta_cache && res != 0) {
+  if (from_tikv && use_obj_meta_cache && res != 0) {
 	string absolute_name = "/" + robj.bucket.name + "/" + robj.key.name;
 	ldout(cct, 10) << "use the object meta cache, but lru not found: " << absolute_name << "! adding to lru list!" << dendl;
 	ceph_assert(obj_meta_cache);

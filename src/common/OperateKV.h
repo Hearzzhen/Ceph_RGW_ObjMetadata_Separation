@@ -6,6 +6,7 @@
 #include "common/ceph_mutex.h"
 #include "common/Cond.h"
 #include "common/txnkv.h"
+#include "common/obj_dir_cache.h"
 
 class CephContext;
 
@@ -21,6 +22,7 @@ private:
   ceph::condition_variable operateKV_empty_cond;
   vector<map<std::string, bufferlist>> operateKV_queue;
   TikvClientOperate *tikvClientOperate;
+  ObjDirCache *obj_dir_cache;
 
   string thread_name;
 
@@ -58,6 +60,10 @@ public:
 	  tikvClientOperate = new TikvClientOperate(_cct, library_path);
 	  string pd_addr = "10.1.172.118:2379";
 	  tikvClientOperate->initTikvClientOperate(pd_addr);
+
+	  obj_dir_cache = new ObjDirCache;
+	  obj_dir_cache->set_ctx(cct);
+	  obj_dir_cache->set_enabled(true);
 	}
 
   ~OperateKV() {
@@ -70,9 +76,10 @@ public:
   void handle_str(std::string& input, vector<string>& result, bool has_flag);
   void recursive(std::string& input, int nums, int count, vector<string>& result, bool has_flag);
   vector<string> extract(std::string& input);
-  bool has_inserted(std::string head_str);
+  bool has_inserted(std::string& head_str);
   std::string replaceAllword(const std::string& resources, const string& key, const std::string& ReplaceKey);
   map<string, bufferlist> getKV(const std::string& obj_name);
+  void find_myself(const string& input, string& self);
 };
 
 #undef dout_subsys

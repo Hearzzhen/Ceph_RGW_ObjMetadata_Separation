@@ -1327,6 +1327,9 @@ OPTION(rgw_cache_enabled, OPT_BOOL)   // rgw cache enabled
 OPTION(rgw_cache_lru_size, OPT_INT)   // num of entries in rgw cache
 OPTION(rgw_obj_meta_cache_enabled, OPT_BOOL) //rgw object metadata cache enabled
 OPTION(rgw_obj_meta_cache_lru_size, OPT_INT) //num of entries in rgw object metadata cache
+OPTION(rgw_obj_dir_cache_warm_lru_size, OPT_INT) //num of entries in rgw object dir structure cache (warm lru)
+OPTION(rgw_obj_dir_cache_hot_lru_size, OPT_INT) //num of entries in rgw object dir structure cache (hot lru)
+OPTION(rgw_obj_dir_cache_warm_entry_max_count, OPT_INT) //max num of rgw dir structure cache entries in warm lru
 OPTION(rgw_socket_path, OPT_STR)   // path to unix domain socket, if not specified, rgw will not run as external fcgi
 OPTION(rgw_host, OPT_STR)  // host for radosgw, can be an IP, default is 0.0.0.0
 OPTION(rgw_port, OPT_STR)  // port to listen, format as "8080" "5000", if not specified, rgw will not run external fcgi

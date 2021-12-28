@@ -50,7 +50,7 @@ void OperateKV::recursive(string& input, int nums, int count, vector<string>& re
 	handle_str(input, result, has_flag);
   }
 
-  if (nums == 1) {
+  if (nums == 2) {
 	return;
   }
 
@@ -91,9 +91,16 @@ std::string OperateKV::replaceAllword(const std::string& resources, const string
   return temp;
 }
 
-bool OperateKV::has_inserted(std::string head_str) {
-  //TODO
-  return false;
+bool OperateKV::has_inserted(std::string& head_str) {
+  int get_res = obj_dir_cache->get(head_str);
+  if (-ENOENT == get_res) {
+	ldout(cct, 10) << "not found " << head_str << " in dir cache." << dendl;
+	obj_dir_cache->put(head_str);
+	return false;
+  } else {
+	ldout(cct, 10) << "found " << head_str << " in dir cache." << dendl;
+	return true;
+  }
 }
 
 map<string, bufferlist> OperateKV::getKV(const std::string& obj_name) {
@@ -121,6 +128,18 @@ map<string, bufferlist> OperateKV::getKV(const std::string& obj_name) {
   return meta_map;
 }
 
+void OperateKV::find_myself(const string& input, string& self) {
+  size_t position;
+  if (input[input.length() - 1] == '/') {
+	position = input.rfind('/', input.length() - 2);
+  } else {
+	position = input.rfind('/');
+  }
+  string pre = input.substr(0, position + 1);
+  string post = input.substr(position + 1, input.length() - 1);
+  self = pre + "." + post;
+}
+
 void *OperateKV::operateKV_thread_entry() {
   std::unique_lock ul(operateKV_lock);
   ldout(cct, 10) << "operateKV_thread start." << dendl;
@@ -137,6 +156,8 @@ void *OperateKV::operateKV_thread_entry() {
 		//extract obj name, and determine the relationship.
 		map<std::string, bufferlist>::iterator iter = p.begin();
 		string obj_name = iter->first;
+		string self;
+		find_myself(obj_name, self);
 		vector<string> extract_res;
 		extract_res = extract(obj_name);
 #if 0
@@ -148,9 +169,10 @@ void *OperateKV::operateKV_thread_entry() {
 		//TODO: extract result should log into LRU or other data structure, avoid to insert to tikv twice and more.
 		for (auto &i : extract_res) {
 		  string _str = i;
-		  if (has_inserted(_str)) 
-			continue;
 		  if (_str[_str.length() - 1] == '-') {
+			if (has_inserted(_str)) {
+			  continue;
+			}
 			map<string, string> args;
 			args.emplace(pair<string, string>(_str, "head"));
 			tikvClientOperate->Puts(args);
@@ -159,6 +181,9 @@ void *OperateKV::operateKV_thread_entry() {
 			  ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
 			}
 		  } else if (_str[_str.length() - 1] == '~') {
+			if (has_inserted(_str)) {
+			  continue;
+			}
 			map<string, string> args;
 			args.emplace(pair<string, string>(_str, "tail"));
 			ldout(cct, 10) << "put tail." << dendl;
@@ -169,11 +194,12 @@ void *OperateKV::operateKV_thread_entry() {
 		  } else {
 			map<std::string, bufferlist> args;
 			map<std::string, std::string> args1;
-			for (auto &i : p) {
-			  //TODO
-			  string m_name = _str;
-			  string b_to_s = string(i.second.to_str());
-			  args1.emplace(pair<string, string>(m_name, b_to_s));
+			if (self == _str) {
+			  for (auto &j : p) {
+			    //TODO
+			    string m_name = _str;
+			    string b_to_s = string(j.second.to_str());
+			    args1.emplace(pair<string, string>(m_name, b_to_s));
 #if 0
 			  ldout(cct, 10) << "test decode: before PUTS:" << dendl;
 			  bufferlist outs;
@@ -187,11 +213,21 @@ void *OperateKV::operateKV_thread_entry() {
 				  ldout(cct, 10) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
 				}
 			  }
-#endif
+
 			  args.emplace(pair<string, bufferlist>(m_name, i.second));
+#endif
+			  }
+			  ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
+			  tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
+			} else {
+			  if (has_inserted(_str)) {
+				continue;
+			  }
+			  args1.emplace(pair<string, string>(_str, "parent_dir"));
+			  tikvClientOperate->Puts(args1);
+			  ldout(cct, 10) << "put parent dir: " << _str << " to tikv!" << dendl;
 			}
-			ldout(cct, 10) << "put objmeta!" << dendl;
-			tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
+#if 0
 			for (auto &i : args) {
 			  ldout(cct, 10) << "key = " << i.first << dendl;//" val = " << i.second << dendl;
 			  map<string, bufferlist> m1;
@@ -200,7 +236,6 @@ void *OperateKV::operateKV_thread_entry() {
 				ldout(cct, 10) << "m_k = " << j.first << dendl;
 			    if (j.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
 				  string t;
-				  //decode(t, j.second);
 				  t = j.second.to_str();
 				  ldout(cct, 10) << "when key = user.rgw.x-amz-meta-s3cmd-attrs, decode val = " << t << dendl;
 			    }
@@ -211,6 +246,7 @@ void *OperateKV::operateKV_thread_entry() {
 			    }
 			  }
 			}
+#endif
 		  }
 		}
 	  }

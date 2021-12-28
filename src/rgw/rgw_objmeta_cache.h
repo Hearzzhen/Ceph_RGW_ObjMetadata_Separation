@@ -7,7 +7,8 @@
 #include "include/utime.h"
 #include "include/types.h"
 #include "common/RWLock.h"
-#include "rgw_rados.h"
+#include "include/Context.h"
+//#include "rgw_rados.h"
 
 class CephContext;
 

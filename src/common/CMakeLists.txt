@@ -98,6 +98,7 @@ set(common_srcs
   util.cc
   version.cc
   xattr.c
+  obj_dir_cache.cc
   OperateKV.cc
   txnkv.cc)
 

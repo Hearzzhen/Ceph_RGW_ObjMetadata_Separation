@@ -1318,7 +1318,8 @@ public:
                pools_initialized(false),
                quota_handler(NULL),
                cr_registry(NULL),
-               meta_mgr(NULL), data_log(NULL), reshard(NULL), operateKV(NULL), obj_meta(NULL), obj_meta_cache(NULL) {}
+               meta_mgr(NULL), data_log(NULL), reshard(NULL), 
+			   operateKV(NULL), obj_meta(NULL), obj_meta_cache(NULL) {}
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;

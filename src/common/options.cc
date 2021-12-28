@@ -5907,6 +5907,24 @@ std::vector<Option> get_rgw_options() {
 		"When full, the RGW Object metadata cache evicts least recently used entries.")
 	.add_see_also("rgw_obj_meta_cache_enabled"),
 
+	Option("rgw_obj_dir_cache_warm_lru_size", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+	.set_default(30000)
+	.set_description("Max number of items in RGW Object dir structure warm cache.")
+	.set_long_description(
+		 "When full, the RGW Object Dir Structure warm cache evicts least recently used entries."),
+	
+	Option("rgw_obj_dir_cache_hot_lru_size", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+	.set_default(30000)
+	.set_description("Max number of items in RGW Object dir structure hot cache.")
+	.set_long_description(
+		 "When full, the RGW Object Dir Structure hot cache evicts least recently used entries."),
+
+	Option("rgw_obj_dir_cache_warm_entry_max_count", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+	.set_default(5)
+	.set_description("Max count of entry in warm lru.")
+	.set_long_description(
+		 "When reached max count, warm lru entry will be removed and insert to hot lru."),
+
     Option("rgw_socket_path", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("")
     .set_description("RGW FastCGI socket path (for FastCGI over Unix domain sockets).")
@@ -7195,6 +7213,25 @@ std::vector<Option> get_rgw_options() {
 	   Option::LEVEL_ADVANCED)
 	.set_default(15_min)
 	.set_description("Number of seconds before entries in the cache are "
+			 "assumed stale and re-fetched. Zero is never.")
+	.add_tag("performance")
+	.add_service("rgw")
+	.set_long_description("The Rados Gateway stores object metadata and objects in "
+			  "an internal cache. This should be kept consistent "
+			  "by the OSD's relaying notify events between "
+			  "multiple watching RGW processes. In the event "
+			  "that this notification protocol fails, bounding "
+			  "the length of time that any data in the cache will "
+			  "be assumed valid will ensure that any RGW instance "
+			  "that falls out of sync will eventually recover. "
+			  "This seems to be an issue mostly for large numbers "
+			  "of RGW instances under heavy use. If you would like "
+			  "to turn off cache expiry, set this value to zero."),
+
+    Option("rgw_obj_dir_cache_hot_expiry_interval", Option::TYPE_UINT,
+	   Option::LEVEL_ADVANCED)
+	.set_default(5_day)
+	.set_description("Number of seconds before hot lru entries in the cache are "
 			 "assumed stale and re-fetched. Zero is never.")
 	.add_tag("performance")
 	.add_service("rgw")
