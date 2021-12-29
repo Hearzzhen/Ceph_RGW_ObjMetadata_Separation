@@ -24,6 +24,9 @@ struct queue_op_map {
   OperateKVOp op;
   string name;   //only use for delete obj
   map<std::string, bufferlist> queue_map; //only use for write obj
+  bool multi_delete; //only use for multi_object delete
+
+  queue_op_map() : multi_delete(false) {}
 };
 
 class OperateKV {
@@ -52,7 +55,7 @@ private:
 
   string library_path;
 public:
-  void queue(string opname, const string& name, map<std::string, bufferlist>& m) {
+  void queue(string opname, const string& name, map<std::string, bufferlist>& m, bool multi_delete = false) {
     std::unique_lock ul(operateKV_lock);
 	if (operateKV_queue.empty()) {
 	  operateKV_cond.notify_all();
@@ -64,6 +67,7 @@ public:
 	} else if (opname == "KV_DEL") {
 	  qom.op = KV_DEL;
 	  qom.name = name;
+	  qom.multi_delete = multi_delete;
 	} else if (opname == "KV_DEL_BUCKET") {
 	  qom.op = KV_DEL_BUCKET;
 	  qom.name = name;
@@ -103,6 +107,7 @@ public:
   std::string replaceAllword(const std::string& resources, const string& key, const std::string& ReplaceKey);
   map<string, bufferlist> getKV(const std::string& obj_name);
   void find_myself(const string& input, string& self);
+  bool parent_dir_check(const string& parent_dir);
   map<string, string> scanKV(const string& cur_prefix, int limit);
 };
 

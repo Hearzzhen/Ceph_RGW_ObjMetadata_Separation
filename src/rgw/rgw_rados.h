@@ -1689,7 +1689,7 @@ public:
       
       explicit Delete(RGWRados::Object *_target) : target(_target) {}
 
-      int delete_obj(bool need_delete_from_tikv = false);
+      int delete_obj(bool need_delete_from_tikv = false, bool multi_delete = false, bool last_obj = false);
     };
 
     struct Stat {
@@ -1806,7 +1806,10 @@ public:
 		   list<rgw_obj_index_key> *remove_objs, const string *user_data = nullptr, bool appendable = false, RGW_ObjMeta *obj_meta = NULL);
       int complete_del(int64_t poolid, uint64_t epoch,
                        ceph::real_time& removed_mtime, /* mtime of removed object */
-                       list<rgw_obj_index_key> *remove_objs, RGW_ObjMeta *obj_meta = nullptr);
+                       list<rgw_obj_index_key> *remove_objs, 
+					   RGW_ObjMeta *obj_meta = nullptr, 
+					   bool multi_delete = false,
+					   bool last_obj = false);
       int cancel();
 
       const string *get_optag() { return &optag; }
@@ -2252,11 +2255,13 @@ public:
   int set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent, string& tag, uint16_t flags);
   int cls_obj_prepare_op(BucketShard& bs, RGWModifyOp op, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModifyOp op, string& tag, int64_t pool, uint64_t epoch,
-                          rgw_bucket_dir_entry& ent, RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr);
+                          rgw_bucket_dir_entry& ent, RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, 
+						  uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr,
+						  bool multi_delete = false, bool last_obj = false);
   int cls_obj_complete_add(BucketShard& bs, const rgw_obj& obj, string& tag, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent,
                            RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr,						   RGW_ObjMeta *obj_meta = nullptr);
   int cls_obj_complete_del(BucketShard& bs, string& tag, int64_t pool, uint64_t epoch, rgw_obj& obj,
-                           ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr);
+                           ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr, bool multi_delete = false, bool last_entry = false);
   int cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_set_bucket_tag_timeout(RGWBucketInfo& bucket_info, uint64_t timeout);
   void filled_omap(obj_omap& oo, rgw_bucket_dir_entry& r);

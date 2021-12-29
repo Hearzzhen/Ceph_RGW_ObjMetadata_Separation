@@ -6502,7 +6502,12 @@ void RGWDeleteMultiObj::execute()
     del_op.params.versioning_status = s->bucket_info.versioning_status();
     del_op.params.obj_owner = s->owner;
 
-    op_ret = del_op.delete_obj(true);
+	bool last_obj = false;
+	if ((iter + 1) == multi_delete->objects.end()) {
+	  ldpp_dout(this, 10) << "this is the last obj: " << *iter << dendl;
+	  last_obj = true;
+	}
+    op_ret = del_op.delete_obj(true, true, last_obj);
     if (op_ret == -ENOENT) {
       op_ret = 0;
     }

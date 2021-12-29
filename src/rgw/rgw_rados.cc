@@ -6193,7 +6193,7 @@ void RGWRados::cls_obj_check_mtime(ObjectOperation& op, const real_time& mtime, 
  * obj: name of the object to delete
  * Returns: 0 on success, -ERR# otherwise.
  */
-int RGWRados::Object::Delete::delete_obj(bool need_delete_from_tikv)
+int RGWRados::Object::Delete::delete_obj(bool need_delete_from_tikv, bool multi_delete, bool last_obj)
 {
   RGWRados *store = target->get_store();
   rgw_obj& src_obj = target->get_obj();
@@ -6365,7 +6365,7 @@ int RGWRados::Object::Delete::delete_obj(bool need_delete_from_tikv)
       tombstone_entry entry{*state};
       obj_tombstone_cache->add(obj, entry);
     }
-    r = index_op.complete_del(poolid, ref.ioctx.get_last_version(), state->mtime, params.remove_objs, obj_meta);
+    r = index_op.complete_del(poolid, ref.ioctx.get_last_version(), state->mtime, params.remove_objs, obj_meta, multi_delete, last_obj);
     
     int ret = target->complete_atomic_modification();
     if (ret < 0) {
@@ -7377,7 +7377,10 @@ int RGWRados::Bucket::UpdateIndex::complete(int64_t poolid, uint64_t epoch,
 
 int RGWRados::Bucket::UpdateIndex::complete_del(int64_t poolid, uint64_t epoch,
                                                 real_time& removed_mtime,
-                                                list<rgw_obj_index_key> *remove_objs, RGW_ObjMeta *obj_meta)
+                                                list<rgw_obj_index_key> *remove_objs, 
+												RGW_ObjMeta *obj_meta,
+												bool multi_delete,
+												bool last_obj)
 {
   if (blind) {
     return 0;
@@ -7392,7 +7395,7 @@ int RGWRados::Bucket::UpdateIndex::complete_del(int64_t poolid, uint64_t epoch,
   }
 
   ret = store->cls_obj_complete_del(*bs, optag, poolid, epoch, obj, removed_mtime, remove_objs, 
-									bilog_flags, zones_trace, obj_meta);
+									bilog_flags, zones_trace, obj_meta, multi_delete, last_obj);
 
   if (target->bucket_info.datasync_flag_enabled()) {
     int r = store->data_log->add_entry(bs->bucket, bs->shard_id);
@@ -9921,7 +9924,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
                                   int64_t pool, uint64_t epoch,
                                   rgw_bucket_dir_entry& ent, RGWObjCategory category,
 				  list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, 
-				  rgw_zone_set *_zones_trace, RGW_ObjMeta *obj_meta)
+				  rgw_zone_set *_zones_trace, RGW_ObjMeta *obj_meta, bool multi_delete, bool last_obj)
 {
   ObjectWriteOperation o;
   rgw_bucket_dir_entry_meta dir_meta;
@@ -10019,7 +10022,14 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  if (obj_meta) {
 		string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
 		map<string, bufferlist> empty_m;
-		operateKV->queue("KV_DEL", absolute_name, empty_m);
+		bool delete_flag = false;
+		if (multi_delete) {
+		  delete_flag = true;
+		  if (last_obj) {
+			delete_flag = false;
+		  }
+		}
+		operateKV->queue("KV_DEL", absolute_name, empty_m, delete_flag);
 		
 		if (use_obj_meta_cache) {
 		  ceph_assert(obj_meta_cache);
@@ -10108,14 +10118,17 @@ int RGWRados::cls_obj_complete_del(BucketShard& bs, string& tag,
                                    real_time& removed_mtime,
                                    list<rgw_obj_index_key> *remove_objs,
                                    uint16_t bilog_flags,
-                                   rgw_zone_set *zones_trace, RGW_ObjMeta *obj_meta)
+                                   rgw_zone_set *zones_trace, 
+								   RGW_ObjMeta *obj_meta,
+								   bool multi_delete,
+								   bool last_obj)
 {
   rgw_bucket_dir_entry ent;
   ent.meta.mtime = removed_mtime;
   obj.key.get_index_key(&ent.key);
   return cls_obj_complete_op(bs, obj, CLS_RGW_OP_DEL, tag, pool, epoch,
 			     ent, RGWObjCategory::None, remove_objs,
-			     bilog_flags, zones_trace, obj_meta);
+			     bilog_flags, zones_trace, obj_meta, multi_delete, last_obj);
 }
 
 int RGWRados::cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace)

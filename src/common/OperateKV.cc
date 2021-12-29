@@ -148,6 +148,20 @@ void OperateKV::find_myself(const string& input, string& self) {
   self = pre + "." + post;
 }
 
+bool OperateKV::parent_dir_check(const string& parent_dir) {
+  bool need_delete = true;
+  map<string, string> scan_result = tikvClientOperate->Scan(parent_dir, 2);
+  for (auto &i : scan_result) {
+	size_t pos = i.first.rfind("/");
+	if (('-' == i.first[pos + 1]) || ('~' == i.first[pos + 1])) {
+	  continue;
+	} else if ('.' == i.first[pos + 1]) {
+	  need_delete = false;
+	}
+  }
+  return need_delete;
+}
+
 void *OperateKV::operateKV_thread_entry() {
   std::unique_lock ul(operateKV_lock);
   ldout(cct, 10) << "operateKV_thread start." << dendl;
@@ -219,14 +233,42 @@ void *OperateKV::operateKV_thread_entry() {
 		    }
 		  }
 	    } else if (qom.op == KV_DEL) {
-		  string del_name;
-		  find_myself(qom.name, del_name);
-		  //TODO: delete dir??? need delete dir cache. 
-		  int del_ret = tikvClientOperate->DelKey(del_name);
-		  if (del_ret != 0) {
-			ldout(cct, 10) << "delete " << del_name << " failed!" << dendl;
+		  if (!qom.multi_delete) {
+		    string del_name;
+		    find_myself(qom.name, del_name);
+		    int del_ret = tikvClientOperate->DelKey(del_name);
+		    if (del_ret != 0) {
+			  ldout(cct, 10) << "delete " << del_name << " failed!" << dendl;
+		    } else {
+			  ldout(cct, 10) << "delete " << del_name << " success!" << dendl;
+			  size_t pos = del_name.rfind("/", del_name.length() - 2);
+			  string parent_dir = del_name.substr(0, pos + 1);
+			  pos = del_name.find("/", 1);
+			  string bucket_name = parent_dir.substr(0, pos + 1);
+			  while ((bucket_name != parent_dir) && (parent_dir_check(parent_dir)) && (del_ret == 0)) {
+			    string dir_name;
+			    find_myself(parent_dir, dir_name);
+			    del_ret = tikvClientOperate->DelKey(parent_dir + "-");
+			    del_ret = tikvClientOperate->DelKey(parent_dir + "~");
+			    del_ret = tikvClientOperate->DelKey(dir_name);
+			    if (del_ret == 0) {
+				  ldout(cct, 10) << "delete " << parent_dir << " success!" << dendl;
+			    } else {
+				  ldout(cct, 10) << "delete " << parent_dir << " failed!" << dendl;
+			    }
+			    pos = parent_dir.rfind("/", parent_dir.length() - 2);
+			    parent_dir = parent_dir.substr(0, pos + 1);
+			  }
+		    }
 		  } else {
-			ldout(cct, 10) << "delete " << del_name << " success!" << dendl;
+			string del_name;
+			find_myself(qom.name, del_name);
+			int del_ret = tikvClientOperate->DelKey(del_name);
+			if (del_ret != 0) {
+			  ldout(cct, 10) << "delete " << del_name << " failed!" << dendl;
+			} else {
+			  ldout(cct, 10) << "delete " << del_name << " success!" << dendl;
+			}
 		  }
 		} else if (qom.op == KV_DEL_BUCKET) {
 		  string del_name = qom.name;
