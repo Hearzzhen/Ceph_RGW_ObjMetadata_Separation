@@ -440,7 +440,7 @@ static int get_multipart_info(RGWRados *store, struct req_state *s,
   return get_multipart_info(store, s, meta_obj, policy, attrs, upload_info);
 }
 
-static int modify_obj_attr(RGWRados *store, struct req_state *s, const rgw_obj& obj, const char* attr_name, bufferlist& attr_val)
+static int modify_obj_attr(RGWRados *store, struct req_state *s, const rgw_obj& obj, const char* attr_name, bufferlist& attr_val, bool need_put_to_tikv = false)
 {
   map<string, bufferlist> attrs;
   RGWRados::Object op_target(store, s->bucket_info, *static_cast<RGWObjectCtx *>(s->obj_ctx), obj);
@@ -454,7 +454,7 @@ static int modify_obj_attr(RGWRados *store, struct req_state *s, const rgw_obj& 
   }
   store->set_atomic(s->obj_ctx, read_op.state.obj);
   attrs[attr_name] = attr_val;
-  return store->set_attrs(s->obj_ctx, s->bucket_info, read_op.state.obj, attrs, NULL);
+  return store->set_attrs(s->obj_ctx, s->bucket_info, read_op.state.obj, attrs, NULL, need_put_to_tikv);
 }
 
 static int read_bucket_policy(RGWRados *store,
@@ -1117,7 +1117,7 @@ void RGWPutObjTags::execute()
   rgw_obj obj;
   obj = rgw_obj(s->bucket, s->object);
   store->set_atomic(s->obj_ctx, obj);
-  op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_TAGS, tags_bl);
+  op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_TAGS, tags_bl, true);
   if (op_ret == -ECANCELED){
     op_ret = -ERR_TAG_CONFLICT;
   }
@@ -1166,7 +1166,7 @@ void RGWDeleteObjTags::execute()
   map <string, bufferlist> rmattr;
   bufferlist bl;
   rmattr[RGW_ATTR_TAGS] = bl;
-  op_ret = store->set_attrs(s->obj_ctx, s->bucket_info, obj, attrs, &rmattr);
+  op_ret = store->set_attrs(s->obj_ctx, s->bucket_info, obj, attrs, &rmattr, true);
 }
 
 int RGWOp::do_aws4_auth_completion()
@@ -5372,7 +5372,7 @@ void RGWPutACLs::execute()
     obj = rgw_obj(s->bucket, s->object);
     store->set_atomic(s->obj_ctx, obj);
     //if instance is empty, we should modify the latest object
-    op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_ACL, bl);
+    op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_ACL, bl, true);
   } else {
     attrs = s->bucket_attrs;
     attrs[RGW_ATTR_ACL] = bl;
@@ -7345,7 +7345,7 @@ void RGWSetAttrs::execute()
 
   if (!s->object.empty()) {
     store->set_atomic(s->obj_ctx, obj);
-    op_ret = store->set_attrs(s->obj_ctx, s->bucket_info, obj, attrs, nullptr);
+    op_ret = store->set_attrs(s->obj_ctx, s->bucket_info, obj, attrs, nullptr, true);
   } else {
     for (auto& iter : attrs) {
       s->bucket_attrs[iter.first] = std::move(iter.second);
@@ -7822,7 +7822,7 @@ void RGWPutObjRetention::execute()
     }
   }
 
-  op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_OBJECT_RETENTION, bl);
+  op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_OBJECT_RETENTION, bl, true);
 
   return;
 }
@@ -7919,7 +7919,7 @@ void RGWPutObjLegalHold::execute() {
   obj_legal_hold.encode(bl);
   rgw_obj obj(s->bucket, s->object);
   //if instance is empty, we should modify the latest object
-  op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_OBJECT_LEGAL_HOLD, bl);
+  op_ret = modify_obj_attr(store, s, obj, RGW_ATTR_OBJECT_LEGAL_HOLD, bl, true);
   return;
 }
 

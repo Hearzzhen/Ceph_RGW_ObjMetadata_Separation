@@ -2083,7 +2083,7 @@ public:
 
   int set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& obj,
                         map<string, bufferlist>& attrs,
-                        map<string, bufferlist>* rmattrs);
+                        map<string, bufferlist>* rmattrs, bool need_put_to_tikv = false);
 
   int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
                     bool follow_olh, bool assume_noent = false);

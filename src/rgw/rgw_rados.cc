@@ -2836,11 +2836,13 @@ int RGWRados::Bucket::List::list_objects_ordered_from_tikv(
 
 	ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ << 
 	  " INFO end of outer loop, truncated=" << *is_truncated <<
-	  ", count=" << max << ", attempt=" << attempt << dendl;
+	  ", count=" << count << ", attempt=" << attempt << dendl;
 
 	if (!(*is_truncated) || count >= max) {
 	  break;
 	} else if (attempt > 9 && count >= 1) {
+	  break;
+	} else if (count == 0) { //tikv is sorted! if count == 0, result is empty surely!
 	  break;
 	}
   }
@@ -6968,7 +6970,7 @@ int RGWRados::set_attr(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& obj
 
 int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& src_obj,
                         map<string, bufferlist>& attrs,
-                        map<string, bufferlist>* rmattrs)
+                        map<string, bufferlist>* rmattrs, bool need_put_to_tikv)
 {
   rgw_obj obj = src_obj;
   if (obj.key.instance == "null") {
@@ -6994,11 +6996,20 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
     return -ENOENT;
   }
 
+  if (need_put_to_tikv) {
+	obj_meta = get_obj_meta();
+  }
   map<string, bufferlist>::iterator iter;
   if (rmattrs) {
     for (iter = rmattrs->begin(); iter != rmattrs->end(); ++iter) {
       const string& name = iter->first;
       op.rmxattr(name.c_str());
+	  if (need_put_to_tikv) {
+		ceph_assert(obj_meta);
+		bufferlist bl;
+		obj_meta->insert_to_metamap(name, bl);
+		ldout(cct, 0) << "(set_attrs) obj_meta rmattrs: " << name << dendl;
+	  }
     }
   }
 
@@ -7012,6 +7023,11 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
       continue;
 
     op.setxattr(name.c_str(), bl);
+	if (need_put_to_tikv) {
+	  ceph_assert(obj_meta);
+	  obj_meta->insert_to_metamap(name, bl);
+	  ldout(cct, 0) << "(set_attrs) obj_meta set " << name << dendl;
+	}
 
     if (name.compare(RGW_ATTR_DELETE_AT) == 0) {
       real_time ts;
@@ -7048,6 +7064,11 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
 
     bl.append(tag.c_str(), tag.size() + 1);
     op.setxattr(RGW_ATTR_ID_TAG,  bl);
+	if (need_put_to_tikv) {
+	  ceph_assert(obj_meta);
+	  obj_meta->insert_to_metamap("user.rgw.idtag", bl);
+	  ldout(cct, 0) << "(set_attrs) obj_meta set user.rgw.idtag" << dendl;
+	}
   }
 
 
@@ -7071,7 +7092,7 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
       int64_t poolid = ref.ioctx.get_id();
       r = index_op.complete(poolid, epoch, state->size, state->accounted_size,
                             mtime, etag, content_type, storage_class, &acl_bl,
-                            RGWObjCategory::Main, NULL);
+                            RGWObjCategory::Main, NULL, nullptr, false, obj_meta);
     } else {
       int ret = index_op.cancel();
       if (ret < 0) {
@@ -9984,8 +10005,9 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  	    ceph_assert(obj_meta_cache);
 	        ObjMetaCacheInfo info;
 	        info.objmeta_kv = raw_map;
-	        info.size = ent.meta.size;
-	        info.mtime = ent.meta.mtime;
+	        //info.size = ent.meta.size;
+	        info.size = 4194304; //block size(TODO)
+			info.mtime = ent.meta.mtime;
 	        obj_meta_cache->put(absolute_name, info);
 	      }
         }
