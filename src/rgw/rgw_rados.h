@@ -1824,6 +1824,16 @@ public:
       rgw_obj_key next_marker;
       int64_t save_max;
 
+	  int list_objects_ordered_from_tikv(RGWRados *store,
+				  RGWBucketInfo& bucket_info,
+				  const int shard_id,
+				  CephContext *cct,
+				  rgw_obj_index_key& cur_marker,
+				  string& cur_prefix,
+				  int64_t max_p,
+				  vector<rgw_bucket_dir_entry> *result,
+				  map<string, bool> *common_prefixes,
+				  bool *is_truncated);
       int list_objects_ordered(int64_t max,
 			       vector<rgw_bucket_dir_entry> *result,
 			       map<string, bool> *common_prefixes,
@@ -2249,6 +2259,21 @@ public:
                            ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr);
   int cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_set_bucket_tag_timeout(RGWBucketInfo& bucket_info, uint64_t timeout);
+  void filled_omap(obj_omap& oo, rgw_bucket_dir_entry& r);
+  int check_filter(struct rgw_bucket_dir_entry& dirent, map<string, bufferlist>& updates, const int shard_id,
+				librados::IoCtx& index_ctx, bool (*force_check_filter)(const string& name));
+  int split_name(const string& name, const char* delim, int start_pos, bool reverse, string& pre, string& post);
+  void suggest_updates(map<string, bufferlist>& updates, librados::IoCtx& index_ctx);
+  int cls_bucket_list_ordered_from_tikv(RGWBucketInfo& bucket_info, const int shard_id,
+			      const rgw_obj_index_key& start_after,
+				  const string& prefix,
+				  const uint32_t num_entries,
+				  bool delimiter,
+				  map<string, rgw_bucket_dir_entry>& m,
+				  map<string, bool> *common_prefixes,
+				  bool *is_truncated,
+				  rgw_obj_index_key *last_entry,
+				  bool (*force_check_filter)(const string& name) = nullptr);
   int cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 			      const int shard_id,
 			      const rgw_obj_index_key& start_after,

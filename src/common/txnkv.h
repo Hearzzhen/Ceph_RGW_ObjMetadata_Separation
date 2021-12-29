@@ -31,7 +31,7 @@ public:
   struct KV_s Get(string& key);
   int DelKey(const string& key);
   int DelKeys(const vector<string>& args);
-  unordered_map<string, string> Scan(string& keyPrefix, int limit); 
+  map<string, string> Scan(const string& keyPrefix, int limit); 
 };
 
 #endif

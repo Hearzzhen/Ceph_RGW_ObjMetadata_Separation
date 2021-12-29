@@ -99,6 +99,7 @@ public:
   std::string replaceAllword(const std::string& resources, const string& key, const std::string& ReplaceKey);
   map<string, bufferlist> getKV(const std::string& obj_name);
   void find_myself(const string& input, string& self);
+  map<string, string> scanKV(const string& cur_prefix, int limit);
 };
 
 #undef dout_subsys

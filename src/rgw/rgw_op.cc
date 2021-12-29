@@ -2775,16 +2775,21 @@ void RGWListBucket::execute()
   op_ret = list_op.list_objects(max, &objs, &common_prefixes, &is_truncated);
   if (op_ret >= 0) {
     next_marker = list_op.get_next_marker();
-    s_max = list_op.get_save_max();
-    if (!next_marker.empty()) {
-      if (saveMax_G.marker.size() >= 10) {
-        saveMax_G.marker.erase(saveMax_G.marker.begin());
-        ldpp_dout(this, 20) << "saveMax_G size = " << saveMax_G.marker.size() << dendl;
+	if (!(s->cct->_conf->rgw_enable_tikv)) {
+      s_max = list_op.get_save_max();
+      if (!next_marker.empty()) {
+        if (saveMax_G.marker.size() >= 10) {
+          saveMax_G.marker.erase(saveMax_G.marker.begin());
+          ldpp_dout(this, 20) << "saveMax_G size = " << saveMax_G.marker.size() << dendl;
+        }
+        saveMax_G.marker.push_back(next_marker.name);
+        saveMax_G.save_max = s_max;
+        ldpp_dout(this, 20) << "s_max: " << s_max << " and next_marker: " << 
+		  next_marker.name << " has been push in saveMax_G." << dendl;
       }
-      saveMax_G.marker.push_back(next_marker.name);
-      saveMax_G.save_max = s_max;
-      ldpp_dout(this, 20) << "s_max and next_marker has been push in saveMax_G." << dendl;
-    }
+	} else {
+	  ldpp_dout(this, 20) << "tikv is enabled! no need the saveMax_G. next_marker = " << next_marker << dendl;
+	}
   }
 }
 

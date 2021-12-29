@@ -54,8 +54,8 @@ int TikvClientOperate::PutsMap(const map<string, string>& args) {
     string temp_k = iter->first;
     string temp_v = iter->second;
     kv[i] = (KV_return*)malloc(sizeof(KV_return));
-    kv[i]->k = (char*)malloc(sizeof(char) * temp_k.length());
-    kv[i]->v = (char*)malloc(sizeof(char) * temp_v.length());
+    kv[i]->k = (unsigned char*)malloc(sizeof(unsigned char) * temp_k.length());
+    kv[i]->v = (unsigned char*)malloc(sizeof(unsigned char) * temp_v.length());
     memcpy(kv[i]->k, temp_k.c_str(), temp_k.length());
     memcpy(kv[i]->v, temp_v.c_str(), temp_v.length());
     iter++;
@@ -101,14 +101,21 @@ struct KV_s TikvClientOperate::Get(string& key) {
   return kv_s;
 }
 
-unordered_map<string, string> TikvClientOperate::Scan(string& keyPrefix, int limit) {
-  unordered_map<string, string> m;
+map<string, string> TikvClientOperate::Scan(const string& keyPrefix, int limit) {
+  map<string, string> m;
   struct scanKV_return res;
   res = scanKV(buildGoString(keyPrefix.c_str(), keyPrefix.size()), limit);
-  if (res.r1 == 0) {
+  if (res.r2 == 0) {
+	if (res.r1 <= limit) {
+	  limit = res.r1;
+	  ldout(cct, 10) << "limit: " << limit << dendl;
+	}
     for (int i = 0; i < limit; ++i) {
-      m.emplace(res.r0[i]->k, res.r0[i]->v);
-      ldout(cct, 10) << res.r0[i]->k << " ==> " << res.r0[i]->v << " was insert into unordered_map!" << dendl;
+	  string sk, sv;
+	  sk.append(reinterpret_cast<const char*>(res.r0[i]->k), res.r0[i]->klen);
+	  sv.append(reinterpret_cast<const char*>(res.r0[i]->v), res.r0[i]->vlen);
+      m.emplace(sk, sv);
+      ldout(cct, 10) << sk << " ==> length: " << sv.length() << " was insert into map!" << dendl;
     }
   }
 

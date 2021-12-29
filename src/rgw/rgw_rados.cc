@@ -2424,6 +2424,434 @@ static inline std::string after_delim(std::string_view delim)
   return result;
 }
 
+void RGWRados::filled_omap(obj_omap& oo, rgw_bucket_dir_entry& r) {
+  r.key.name = oo.name;
+  r.key.instance = oo.instance;
+  r.ver.pool = oo.pool;
+  r.ver.epoch = oo.epoch;
+  r.locator = oo.locator;
+  r.exists = oo.exists;
+  r.meta.category = oo.meta.category;
+  r.meta.size = oo.meta.size;
+  r.meta.mtime = oo.meta.mtime;
+  r.meta.etag = oo.meta.etag;
+  r.meta.owner = oo.meta.owner;
+  r.meta.owner_display_name = oo.meta.owner_display_name;
+  r.meta.content_type = oo.meta.content_type;
+  r.meta.accounted_size = oo.meta.accounted_size;
+  r.meta.user_data = oo.meta.user_data;
+  r.meta.storage_class = oo.meta.storage_class;
+  r.meta.appendable = oo.meta.appendable;
+  r.tag = oo.tag;
+  r.flags = oo.flags;
+  //pending_map、index_ver、versioned_epoch is written by osd, no way to record.
+}
+
+//TODO: check again!
+int RGWRados::check_filter(struct rgw_bucket_dir_entry& dirent, map<string, bufferlist>& updates, const int shard_id, 
+						   librados::IoCtx& index_ctx, bool (*force_check_filter)(const string& name)) {
+#if 0
+  bool force_check = force_check_filter && force_check_filter(dirent.key.name);
+  if ((!dirent.exists && !dirent.is_delete_marker()) || force_check) {
+	map<int, string> oids;
+	int r = open_bucket_index(bucket_info, index_ctx, oids, shard_id);
+	if (r < 0) {
+	  return r;
+	}
+	librados::IoCtx sub_ctx;
+	sub_ctx.dup(index_ctx);
+	r = check_disk_state(sub_ctx, bucket_info, dirent, dirent,
+		updates[vnames[pos]]);
+	if (r < 0 && r != -ENOENT) {
+	  return r;
+	}
+  } else {
+	return 0;
+  }
+#endif
+  return 0;
+}
+
+void RGWRados::suggest_updates(map<string, bufferlist>& updates, librados::IoCtx& index_ctx) {
+  for (auto& miter : updates) {
+    if (miter.second.length()) {
+	  ObjectWriteOperation o;
+	  cls_rgw_suggest_changes(o, miter.second);
+	  // we don't care if we lose suggested updates, send them off blindly
+	  AioCompletion *c = librados::Rados::aio_create_completion(NULL, NULL, NULL);
+	  index_ctx.aio_operate(miter.first, c, &o);
+	  c->release();
+	}
+  }
+}
+
+int RGWRados::split_name(const string& name, const char* delim, int start_pos, bool reverse, string& pre, string& post) {
+  size_t pos = 0;
+  if (start_pos == -1) {
+    if (reverse) {
+	  pos = name.rfind(delim);
+	} else {
+	  pos = name.find(delim);
+	}
+  } else {
+	if (reverse) {
+	  pos = name.rfind(delim, start_pos);
+	} else {
+	  pos = name.find(delim, start_pos);
+	}
+  }
+  if (string::npos != pos) {
+    pre = name.substr(0, pos + 1);
+	post = name.substr(pos + 1, name.length() - 1);
+	return 0;
+  } else {
+    return -1;
+  }
+}
+
+int RGWRados::cls_bucket_list_ordered_from_tikv(RGWBucketInfo& bucket_info, const int shard_id,
+			  const rgw_obj_index_key& start_after,
+			  const string& prefix,
+			  const uint32_t num_entries,
+			  bool delimiter,
+			  map<string, rgw_bucket_dir_entry>& m,
+			  map<string, bool> *common_prefixes,
+			  bool *is_truncated,
+			  rgw_obj_index_key *last_entry,
+			  bool (*force_check_filter)(const string& name)) {
+  m.clear();
+  *is_truncated = true;
+  map<string, bufferlist> updates;
+  librados::IoCtx index_ctx;
+  string scan_name;
+  string parent_name;
+  string contain_name;
+  string bucket_name = "/" + bucket_info.bucket.name + "/";
+  if (prefix[prefix.length() - 1] == '/') {
+    if (start_after.name == "") { //first scan.
+      scan_name = bucket_name + prefix;
+	  parent_name = scan_name;
+    } else { //not first scan. not attempt: dir11/ctest2/ object: dir11/.ceph_dss  attempt: dir11/.ctest/
+	  scan_name = bucket_name + start_after.name;
+	  if (start_after.name[start_after.name.length() - 1] == '/') {
+		string pr, po;
+		if (0 == split_name(start_after.name, "/", start_after.name.length() - 2, true, pr, po)) {
+		  if (po[0] != '.') {
+			scan_name = bucket_name + pr + "." + po;
+		  }
+		}
+	  }
+	  parent_name = bucket_name + prefix;
+    }
+  } else {
+    //scan include obj
+	string pre, post;
+	if (0 == split_name(prefix, "/", -1, true, pre, post)) {
+	  if (start_after.name == "") {
+		scan_name = bucket_name + pre + "." + post;
+		contain_name = scan_name;
+	  } else {
+		scan_name = bucket_name + start_after.name;
+		string pr, po;
+		if (0 == split_name(start_after.name, "/", start_after.name.length() - 2, true, pr, po)) {
+		  if (po[0] != '.') {
+			scan_name = bucket_name + pr + "." + po;
+		  }
+		}
+		contain_name = bucket_name + pre + "." + post;
+	  }
+	  parent_name = bucket_name + pre;
+	} else {
+	  if (start_after.name == "") {
+		scan_name = bucket_name + "." + prefix;
+		contain_name = scan_name;
+	  } else {
+		scan_name = bucket_name + "." + start_after.name;
+		contain_name = bucket_name + "." + prefix;
+	  }
+	  parent_name = bucket_name;
+	}
+  }
+
+  ldout(cct, 10) << "RGWRados::" << __func__ << ": " << "bucket=\"" << bucket_info.bucket.name 
+	  << "\" start_after=\"" << start_after.name << "[" << start_after.instance << "]\", prefix=\"" 
+	  << prefix << "\" num_entries=" << num_entries << 
+	  " scan_name = \"" << scan_name << "\" parent_name = \"" << parent_name << "\" contain_name = " << 
+	  contain_name << dendl;
+  
+  //dir file different!!!
+  rgw_bucket_dir_entry r;
+  map<string, string> scan_result;
+  map<string, bufferlist> result;
+  scan_result = operateKV->scanKV(scan_name, num_entries);
+  map<string, string>::reverse_iterator rit = scan_result.rbegin();
+  string pre_name, post_name;
+  if (0 == (split_name(rit->first, "/", 1, false, pre_name, post_name))) {
+	if (post_name[0] == '.') {
+	  post_name = post_name.substr(1, post_name.length() - 1);
+	}
+	(*last_entry).name = post_name;
+  }
+  for (auto &i : scan_result) {
+	if (start_after.name != "") {
+	  string pr, po;
+	  if (0 == split_name(start_after.name, "/", start_after.name.length() - 2, true, pr, po)) {
+		if (po[0] != '.') {
+		  if (i.first == bucket_name + pr + "." + po) 
+			continue;
+		} else {
+		  if (i.first == bucket_name + start_after.name)
+			continue;
+		}
+	  } else {
+		if (i.first == bucket_name + "." + start_after.name) {
+		  continue;
+		}
+	  }
+	}
+	if (delimiter) { //read cur dir
+	  string temp = i.first;
+	  if (i.first[i.first.length() - 1] == '/') {
+		temp = i.first.substr(0, i.first.length() - 1);
+	  }
+	  size_t position = temp.rfind("/");
+	  if (temp[position + 1] != '.') {
+		string pre_temp = temp.substr(0, position + 1);
+		if (pre_temp != parent_name) {
+		  *is_truncated = false;
+		  break;
+		}
+		if (temp[position + 1] == '-' || temp[position + 1] == '~') {
+		  continue;
+		}
+		
+		*is_truncated = false;
+		break;
+	  }
+
+	  if (contain_name != "") {
+		if (string::npos == i.first.find(contain_name)) {
+		  *is_truncated = false;
+		  break;
+		}
+	  }
+
+	  if (i.first[i.first.length() - 1] == '/') {
+		//is dir
+		string temp = i.first.substr(0, i.first.length() - 1);
+		string temp_pre, temp_post;
+		if (0 == split_name(temp, "/", 1, false, temp_pre, temp_post)) {
+		  string post_pre, post_post;
+		  if (0 == split_name(temp_post, "/", -1, true, post_pre, post_post)) {
+			if (post_post[0] == '.') {
+			  post_post = post_post.substr(1, post_post.length() - 1);
+			}
+			string obj_name = post_pre + post_post + "/";
+			(*common_prefixes)[obj_name] = true;
+		  } else {
+			string obj_name = temp_post.substr(1, temp_post.length() - 1);
+			obj_name = obj_name + "/";
+			(*common_prefixes)[obj_name] = true;
+		  }
+		}
+	  } else {
+		//is file
+		map<string, bufferlist> decode_result;
+		bufferlist out;
+		out.append(i.second);
+		decode(decode_result, out);
+		for (auto &p : decode_result) {
+		  if (p.first == "omapvals") {
+			obj_omap oo;
+			decode(oo, p.second);
+			struct rgw_bucket_dir_entry r;
+			filled_omap(oo, r);
+			size_t pos = i.first.find("/", 1);
+			string post = i.first.substr(pos + 1, i.first.length() - 1);
+			pos = post.rfind("/");
+			string post_pre = post.substr(0, pos + 1);
+			string post_post = post.substr(pos + 2, post.length() - 1);
+			if (true||0 == check_filter(r, updates, shard_id, index_ctx, force_check_filter)) {//TODO!!
+			  string obj_name = post_pre + post_post;
+			  m[obj_name] = r;
+			  //ldout(cct, 20) << "RGWRados::" << __func__ << " currently processing " << obj_name << " from tikv." << dendl;
+			  //suggest_updates(updates, index_ctx);
+			}
+		  }
+		}
+	  }
+	} else { //only read file
+	  string parent_name_tail = parent_name + "~";
+	  if (i.first == parent_name_tail) {
+		*is_truncated = false;
+	    break;
+	  }
+
+	  size_t pos = 0;
+	  size_t pos_bucket = 0;
+	  string post;
+	  string pre_post;
+	  string post_post;
+	  string obj_name;
+	  pos_bucket = i.first.find("/", 1);
+	  post = i.first.substr(pos_bucket + 1, i.first.length() - 1);
+	  if (post[post.length() - 1] != '/') {
+	    pos = post.rfind("/", post.length() - 1);
+		pre_post = post.substr(0, pos + 1);
+		post_post = post.substr(pos + 2, post.length() - 1);
+	  } else {
+		continue;
+	  }
+	  if (post[pos + 1] == '.') {
+		map<string, bufferlist> decode_result;
+		bufferlist out;
+		out.append(i.second);
+		decode(decode_result, out);
+		for (auto &p : decode_result) {
+		  if (p.first == "omapvals") {
+			obj_omap oo;
+			decode(oo, p.second);
+			struct rgw_bucket_dir_entry r;
+			filled_omap(oo, r);
+			if (true||0 == check_filter(r, updates, shard_id, index_ctx, force_check_filter)) {//TODO!!!
+			  string obj_name = pre_post + post_post;
+			  m[obj_name] = r;
+			  //ldout(cct, 20) << "RGWRados::" << __func__ << " (no delimiter) currently processing " << obj_name << dendl;
+			  //suggest_updates(updates, index_ctx);
+			}
+		  }
+		}
+	  }
+	}
+  }
+
+  ldout(cct, 20) << "RGWRados::" << __func__ << " :returning: " << dendl;
+  if (delimiter) {
+	ldout(cct, 20) << "m.count = " << m.size() << " common_prefixes.count = " << common_prefixes->size() << dendl;
+  } else {
+	ldout(cct, 20) << "m.count = " << m.size() << dendl;
+  }
+  ldout(cct, 20) << "is_truncated = " << *is_truncated << " last_entry.name = " << (*last_entry).name << dendl;
+
+  return 0;
+}
+
+//other robustness judgment should be considered. Basic function is ok now.
+int RGWRados::Bucket::List::list_objects_ordered_from_tikv(
+  RGWRados *store,
+  RGWBucketInfo& bucket_info,
+  const int shard_id,
+  CephContext *cct,
+  rgw_obj_index_key& cur_marker,
+  string& cur_prefix,
+  int64_t max_p,
+  vector<rgw_bucket_dir_entry> *result,
+  map<string, bool> *common_prefixes,
+  bool *is_truncated)
+{
+  int max = cct->_conf->rgw_list_bucket_min_readahead; //default 1000
+  result->clear();
+  
+  rgw_obj_index_key last_entry;
+  int count = 0;
+  map<string, bool> _common_prefixes;
+  for (uint16_t attempt = 1; ; ++attempt) {
+	if (attempt > 1) {
+	  cur_marker = last_entry;
+	}
+	ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ <<
+	  " starting attempt " << attempt << " cur_marker = " << cur_marker.name << dendl;
+	std::map<string, rgw_bucket_dir_entry> ent_map;
+	int r = store->cls_bucket_list_ordered_from_tikv(bucket_info,
+									  shard_id,
+									  cur_marker,
+									  cur_prefix,
+									  max,
+									  !params.delim.empty(),
+									  ent_map,
+									  &_common_prefixes,
+									  is_truncated,
+									  &last_entry);
+	if (r < 0) {
+	  return r;
+	}
+	
+	for (auto eiter = ent_map.begin(); eiter != ent_map.end(); ++eiter) {
+	  rgw_bucket_dir_entry& entry = eiter->second;
+	  rgw_obj_index_key index_key = entry.key;
+	  rgw_obj_key obj(index_key);
+
+	  ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ << " considering entry " << entry.key << dendl;
+	  bool valid = rgw_obj_key::parse_raw_oid(index_key.name, &obj);
+	  if (!valid) {
+		ldout(cct, 0) << "ERROR: could not parse object name: " << obj.name << dendl;
+		continue;
+	  }
+
+	  if (!params.list_versions && !entry.is_visible()) {
+	    ldout(cct, 10) << "continue! not list_versions and entry is not visible!" << dendl;
+		continue;
+	  }
+
+	  /*const bool matched_ns = (obj.ns == params.ns);
+	  if (params.enforce_ns && !matched_ns) {
+	    if (!params.ns.empty()) {
+	      // we've iterated past the namespace we're searching -- done now 
+		  truncated = false;
+		  goto done;
+	    } else {
+	      // we're enforcing an empty namespace, so we need to skip
+		  // past the namespace block
+		  marker_skip_ahead = rgw_obj_key::after_namespace_marker(key);
+		  continue;
+	    }
+	  }*/
+
+	  if (params.filter && !params.filter->filter(obj.name, index_key.name)) {
+	    continue;
+	  }
+
+	  if (params.prefix.size() &&
+	  (obj.name.compare(0, params.prefix.size(), params.prefix) != 0)) {
+		continue;
+	  }
+
+	  ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ << " adding entry " << entry.key << " to result." << dendl;
+	  result->emplace_back(std::move(entry));
+	  count++;
+	}
+
+	if (!params.delim.empty()) {
+	  for (auto citer = _common_prefixes.begin(); citer != _common_prefixes.end(); ++citer) {
+	    if (common_prefixes && 
+			common_prefixes->find(citer->first) == common_prefixes->end()) {
+		  (*common_prefixes)[citer->first] = true;
+		  count++;
+		  ldout(cct, 20) << "marker_skip_ahead=" << citer->first << dendl;
+		}
+	  }
+	}
+	params.marker = last_entry;
+	next_marker = last_entry;
+
+	ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ << 
+	  " INFO end of outer loop, truncated=" << *is_truncated <<
+	  ", count=" << max << ", attempt=" << attempt << dendl;
+
+	if (!(*is_truncated) || count >= max) {
+	  break;
+	} else if (attempt > 9 && count >= 1) {
+	  break;
+	}
+  }
+
+  auto csz = (common_prefixes) ? common_prefixes->size() : 0;
+  ldout(cct, 10) << "RGWRados::Bucket::List::" << __func__ <<
+	" INFO returning " << result->size() << " entries and "
+	<< csz << " common prefixes" << dendl;
+
+  return 0;
+}
 
 /**
  * Get ordered listing of the objects in a bucket.
@@ -2468,6 +2896,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
 			 params.ns.empty() ? params.marker.ns : params.ns);
   rgw_obj_index_key cur_marker;
   marker_obj.get_index_key(&cur_marker);
+  //ldout(cct, 0) << "~~~~~~~~~~~~~~~~~~~~~~~~~ cur_marker = " << cur_marker << dendl;
 
   rgw_obj_key end_marker_obj(params.end_marker.name,
 			     params.end_marker.instance,
@@ -2480,6 +2909,25 @@ int RGWRados::Bucket::List::list_objects_ordered(
   prefix_obj.set_ns(params.ns);
   string cur_prefix = prefix_obj.get_index_key_name();
   string after_delim_s; /* needed in !params.delim.empty() AND later */
+
+  if (cct->_conf->rgw_enable_tikv) {
+	ldout(cct, 1) << "from tikv list bucket: " << dendl;
+	int ret = list_objects_ordered_from_tikv(store,
+							                 target->get_bucket_info(),
+											 shard_id,
+											 cct,
+											 cur_marker,
+											 cur_prefix,
+											 max_p,
+											 result,
+											 common_prefixes,
+											 is_truncated);
+	if (ret == 0) {
+	  ldout(cct, 10) << "from tikv list bucket success." << dendl;
+	  return 0;
+	}
+  }
+  ldout(cct, 1) << "from osd list bucket: " << dendl;
 
   if (!params.delim.empty()) {
     after_delim_s = after_delim(params.delim);

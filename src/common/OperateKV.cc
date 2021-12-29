@@ -128,6 +128,11 @@ map<string, bufferlist> OperateKV::getKV(const std::string& obj_name) {
   return meta_map;
 }
 
+map<string, string> OperateKV::scanKV(const string& cur_prefix, int limit) {
+  map<string, string> scan_res = tikvClientOperate->Scan(cur_prefix, limit);
+  return scan_res;
+}
+
 void OperateKV::find_myself(const string& input, string& self) {
   size_t position;
   if (input[input.length() - 1] == '/') {
