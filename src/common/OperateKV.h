@@ -14,13 +14,24 @@ class CephContext;
 #undef dout_prefix
 #define dout_prefix *_dout << "operateKV "
 
+enum OperateKVOp {
+  KV_ADD = 0,
+  KV_DEL = 1,
+};
+
+struct queue_op_map {
+  OperateKVOp op;
+  string name;   //only use for delete obj
+  map<std::string, bufferlist> queue_map; //only use for write obj
+};
+
 class OperateKV {
 private:
   CephContext *cct;
   ceph::mutex operateKV_lock;
   ceph::condition_variable operateKV_cond;
   ceph::condition_variable operateKV_empty_cond;
-  vector<map<std::string, bufferlist>> operateKV_queue;
+  vector<queue_op_map> operateKV_queue;
   TikvClientOperate *tikvClientOperate;
   ObjDirCache *obj_dir_cache;
 
@@ -40,12 +51,20 @@ private:
 
   string library_path;
 public:
-  void queue(map<std::string, bufferlist>& m) {
+  void queue(string opname, const string& name, map<std::string, bufferlist>& m) {
     std::unique_lock ul(operateKV_lock);
 	if (operateKV_queue.empty()) {
 	  operateKV_cond.notify_all();
 	}
-	operateKV_queue.push_back(m);
+	struct queue_op_map qom;
+	if (opname == "KV_ADD") {
+	  qom.op = KV_ADD;
+	  qom.queue_map = m;
+	} else if (opname == "KV_DEL") {
+	  qom.op = KV_DEL;
+	  qom.name = name;
+	}
+	operateKV_queue.push_back(qom);
   }
 
   void start();

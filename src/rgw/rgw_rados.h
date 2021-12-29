@@ -1689,7 +1689,7 @@ public:
       
       explicit Delete(RGWRados::Object *_target) : target(_target) {}
 
-      int delete_obj();
+      int delete_obj(bool need_delete_from_tikv = false);
     };
 
     struct Stat {
@@ -1806,7 +1806,7 @@ public:
 		   list<rgw_obj_index_key> *remove_objs, const string *user_data = nullptr, bool appendable = false, RGW_ObjMeta *obj_meta = NULL);
       int complete_del(int64_t poolid, uint64_t epoch,
                        ceph::real_time& removed_mtime, /* mtime of removed object */
-                       list<rgw_obj_index_key> *remove_objs);
+                       list<rgw_obj_index_key> *remove_objs, RGW_ObjMeta *obj_meta = nullptr);
       int cancel();
 
       const string *get_optag() { return &optag; }
@@ -2246,7 +2246,7 @@ public:
   int cls_obj_complete_add(BucketShard& bs, const rgw_obj& obj, string& tag, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent,
                            RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr,						   RGW_ObjMeta *obj_meta = nullptr);
   int cls_obj_complete_del(BucketShard& bs, string& tag, int64_t pool, uint64_t epoch, rgw_obj& obj,
-                           ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
+                           ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr, RGW_ObjMeta *obj_meta = nullptr);
   int cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_set_bucket_tag_timeout(RGWBucketInfo& bucket_info, uint64_t timeout);
   int cls_bucket_list_ordered(RGWBucketInfo& bucket_info,

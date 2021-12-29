@@ -146,146 +146,84 @@ void *OperateKV::operateKV_thread_entry() {
 
   while(!operateKV_stop) {
 	while(!operateKV_queue.empty()) {
-	  vector<map<std::string, bufferlist>> ls;
+	  vector<queue_op_map> ls;
 	  ls.swap(operateKV_queue);
 	  operateKV_running = true;
 	  ul.unlock();
 	  ldout(cct, 10) << "operateKV_thread doing." << dendl;
 
 	  for (auto p : ls) {
-		//extract obj name, and determine the relationship.
-		map<std::string, bufferlist>::iterator iter = p.begin();
-		string obj_name = iter->first;
-		string self;
-		find_myself(obj_name, self);
-		vector<string> extract_res;
-		extract_res = extract(obj_name);
-#if 0
-		ldout(cct, 10) << "print extract_res: " << dendl;
-		for (auto &i : extract_res) {
-		  ldout(cct, 10) << i << dendl;
-		}
-#endif
-		//TODO: extract result should log into LRU or other data structure, avoid to insert to tikv twice and more.
-		for (auto &i : extract_res) {
-		  string _str = i;
-		  if (_str[_str.length() - 1] == '-') {
-			if (has_inserted(_str)) {
-			  continue;
-			}
-			map<string, string> args;
-			args.emplace(pair<string, string>(_str, "head"));
-			tikvClientOperate->Puts(args);
-			ldout(cct, 10) << "put head." << dendl;
-			for (auto &i : args) {
-			  ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
-			}
-		  } else if (_str[_str.length() - 1] == '~') {
-			if (has_inserted(_str)) {
-			  continue;
-			}
-			map<string, string> args;
-			args.emplace(pair<string, string>(_str, "tail"));
-			ldout(cct, 10) << "put tail." << dendl;
-			tikvClientOperate->Puts(args);
-			for (auto &i : args) {
-			  ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
-			}
-		  } else {
-			map<std::string, bufferlist> args;
-			map<std::string, std::string> args1;
-			if (self == _str) {
-			  for (auto &j : p) {
-			    //TODO
-			    string m_name = _str;
-			    string b_to_s = string(j.second.to_str());
-			    args1.emplace(pair<string, string>(m_name, b_to_s));
-#if 0
-			  ldout(cct, 10) << "test decode: before PUTS:" << dendl;
-			  bufferlist outs;
-			  outs.append(b_to_s);
-			  map<std::string, bufferlist> mmm;
-			  decode(mmm, outs);
-			  for (auto &p : mmm) {
-				ldout(cct, 10) << p.first << dendl;
-				if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
-				  string t = p.second.to_str();
-				  ldout(cct, 10) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
-				}
-			  }
-
-			  args.emplace(pair<string, bufferlist>(m_name, i.second));
-#endif
-			  }
-			  ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
-			  tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
-			} else {
+		queue_op_map qom = p;
+		if (qom.op == KV_ADD) {
+		  //extract obj name, and determine the relationship.
+		  map<std::string, bufferlist> objmeta_map = qom.queue_map;
+		  map<std::string, bufferlist>::iterator iter = objmeta_map.begin();
+		  string obj_name = iter->first;
+		  string self;
+		  find_myself(obj_name, self);
+		  vector<string> extract_res;
+		  extract_res = extract(obj_name);
+		  //TODO: extract result should log into LRU or other data structure, avoid to insert to tikv twice and more.
+		  for (auto &i : extract_res) {
+		    string _str = i;
+		    if (_str[_str.length() - 1] == '-') {
 			  if (has_inserted(_str)) {
-				continue;
+			    continue;
 			  }
-			  args1.emplace(pair<string, string>(_str, "parent_dir"));
-			  tikvClientOperate->Puts(args1);
-			  ldout(cct, 10) << "put parent dir: " << _str << " to tikv!" << dendl;
-			}
-#if 0
-			for (auto &i : args) {
-			  ldout(cct, 10) << "key = " << i.first << dendl;//" val = " << i.second << dendl;
-			  map<string, bufferlist> m1;
-			  decode(m1, i.second);
-			  for (auto &j : m1) {
-				ldout(cct, 10) << "m_k = " << j.first << dendl;
-			    if (j.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
-				  string t;
-				  t = j.second.to_str();
-				  ldout(cct, 10) << "when key = user.rgw.x-amz-meta-s3cmd-attrs, decode val = " << t << dendl;
-			    }
-			    if (j.first == "omapvals") {
-				  obj_omap oo(cct);
-				  decode(oo, j.second);
-				  ldout(cct, 10) << "when key = oo.epoch, val = " << oo.epoch << dendl;
-			    }
+			  map<string, string> args;
+			  args.emplace(pair<string, string>(_str, "head"));
+			  tikvClientOperate->Puts(args);
+			  ldout(cct, 10) << "put head." << dendl;
+			  for (auto &i : args) {
+			    ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
 			  }
-			}
-#endif
+		    } else if (_str[_str.length() - 1] == '~') {
+			  if (has_inserted(_str)) {
+			    continue;
+			  }
+			  map<string, string> args;
+			  args.emplace(pair<string, string>(_str, "tail"));
+			  ldout(cct, 10) << "put tail." << dendl;
+			  tikvClientOperate->Puts(args);
+			  for (auto &i : args) {
+			    ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
+			  }
+		    } else {
+			  map<std::string, bufferlist> args;
+			  map<std::string, std::string> args1;
+			  if (self == _str) {
+			    for (auto &j : objmeta_map) {
+			      //TODO
+			      string m_name = _str;
+			      string b_to_s = string(j.second.to_str());
+			      args1.emplace(pair<string, string>(m_name, b_to_s));
+			    }
+			    ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
+			    tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
+			  } else {
+			    if (has_inserted(_str)) {
+				  continue;
+			    }
+			    args1.emplace(pair<string, string>(_str, "parent_dir"));
+			    tikvClientOperate->Puts(args1);
+			    ldout(cct, 10) << "put parent dir: " << _str << " to tikv!" << dendl;
+			  }
+		    }
+		  }
+	    } else if (qom.op == KV_DEL) {
+		  string del_name;
+		  find_myself(qom.name, del_name);
+		  //TODO: delete dir??? need delete dir cache. 
+		  int del_ret = tikvClientOperate->DelKey(del_name);
+		  if (del_ret != 0) {
+			ldout(cct, 10) << "delete " << del_name << " failed!" << dendl;
+		  } else {
+			ldout(cct, 10) << "delete " << del_name << " success!" << dendl;
 		  }
 		}
 	  }
-#if 0
-		ldout(cct, 10) << "test get and decode: " << dendl;
-		for (auto p : ls) {
-		  map<std::string, bufferlist>::iterator iter = p.begin();
-		  string obj_name = iter->first;
-		  size_t position = obj_name.rfind("/");
-		  string pre_str = obj_name.substr(0, position + 1);
-		  string post_str = obj_name.substr(position + 1, obj_name.length() - 1);
-		  string final_name_head = pre_str + "-";
-		  string final_name = pre_str + "." + post_str;
-		  string final_name_tail = pre_str + "~";
-		  struct KV_s kv_s1;
-		  struct KV_s kv_s2;
-		  struct KV_s kv_s3;
-		  kv_s1 = tikvClientOperate->Get(final_name_head);
-		  ldout(cct, 10) << "Get key= " << kv_s1.k << " val= " << kv_s1.v << dendl;
-		  kv_s2 = tikvClientOperate->Get(final_name_tail);
-		  ldout(cct, 10) << "Get key= " << kv_s2.k << " val= " << kv_s2.v << dendl;
-		  kv_s3 = tikvClientOperate->Get(final_name);
-		  ldout(cct, 10) << "Get key= " << kv_s3.k << ": " << dendl;
-		  bufferlist out;
-		  out.append(kv_s3.v);
-
-		  map<string, bufferlist> m2;
-	   	  decode(m2, out);
-		  for (auto &p : m2) {
-		    ldout(cct, 10) << p.first << dendl;
-		    if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
-		      string t = p.second.to_str();
-		      ldout(cct, 10) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
-		    }
-		  }
-		}
-#endif
 	  
-	  ldout(cct, 10) << "operateKV_thread done with " << ls << dendl;
+	  ldout(cct, 10) << "operateKV_thread done with " << &ls << dendl;
 	  ls.clear();
 	  ul.lock();
 	  operateKV_running = false; 

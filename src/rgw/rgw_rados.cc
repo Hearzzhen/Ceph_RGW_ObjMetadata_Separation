@@ -5735,10 +5735,14 @@ void RGWRados::cls_obj_check_mtime(ObjectOperation& op, const real_time& mtime, 
  * obj: name of the object to delete
  * Returns: 0 on success, -ERR# otherwise.
  */
-int RGWRados::Object::Delete::delete_obj()
+int RGWRados::Object::Delete::delete_obj(bool need_delete_from_tikv)
 {
   RGWRados *store = target->get_store();
   rgw_obj& src_obj = target->get_obj();
+  RGW_ObjMeta *obj_meta = nullptr;
+  if (need_delete_from_tikv) {
+	obj_meta = store->get_obj_meta();
+  }
   const string& instance = src_obj.key.instance;
   rgw_obj obj = src_obj;
 
@@ -5903,7 +5907,7 @@ int RGWRados::Object::Delete::delete_obj()
       tombstone_entry entry{*state};
       obj_tombstone_cache->add(obj, entry);
     }
-    r = index_op.complete_del(poolid, ref.ioctx.get_last_version(), state->mtime, params.remove_objs);
+    r = index_op.complete_del(poolid, ref.ioctx.get_last_version(), state->mtime, params.remove_objs, obj_meta);
     
     int ret = target->complete_atomic_modification();
     if (ret < 0) {
@@ -6896,7 +6900,7 @@ int RGWRados::Bucket::UpdateIndex::complete(int64_t poolid, uint64_t epoch,
 
 int RGWRados::Bucket::UpdateIndex::complete_del(int64_t poolid, uint64_t epoch,
                                                 real_time& removed_mtime,
-                                                list<rgw_obj_index_key> *remove_objs)
+                                                list<rgw_obj_index_key> *remove_objs, RGW_ObjMeta *obj_meta)
 {
   if (blind) {
     return 0;
@@ -6910,7 +6914,8 @@ int RGWRados::Bucket::UpdateIndex::complete_del(int64_t poolid, uint64_t epoch,
     return ret;
   }
 
-  ret = store->cls_obj_complete_del(*bs, optag, poolid, epoch, obj, removed_mtime, remove_objs, bilog_flags, zones_trace);
+  ret = store->cls_obj_complete_del(*bs, optag, poolid, epoch, obj, removed_mtime, remove_objs, 
+									bilog_flags, zones_trace, obj_meta);
 
   if (target->bucket_info.datasync_flag_enabled()) {
     int r = store->data_log->add_entry(bs->bucket, bs->shard_id);
@@ -9442,7 +9447,8 @@ int RGWRados::cls_obj_prepare_op(BucketShard& bs, RGWModifyOp op, string& tag,
 int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModifyOp op, string& tag,
                                   int64_t pool, uint64_t epoch,
                                   rgw_bucket_dir_entry& ent, RGWObjCategory category,
-				  list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *_zones_trace, RGW_ObjMeta *obj_meta)
+				  list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, 
+				  rgw_zone_set *_zones_trace, RGW_ObjMeta *obj_meta)
 {
   ObjectWriteOperation o;
   rgw_bucket_dir_entry_meta dir_meta;
@@ -9463,6 +9469,14 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   ldout(cct, 0) << "before cls_rgw_bucket_complete_op... obj_meta = " << obj_meta << dendl;
   cls_rgw_bucket_complete_op(o, op, tag, ver, key, dir_meta, remove_objs,
                              svc.zone->get_zone().log_data, bilog_flags, &zones_trace);
+  complete_op_data *arg;
+  index_completion_manager->create_completion(obj, op, tag, ver, key, dir_meta, remove_objs,
+				                              svc.zone->get_zone().log_data, bilog_flags, &zones_trace, &arg);
+  librados::AioCompletion *completion = arg->rados_completion;
+  int ret = bs.index_ctx.aio_operate(bs.bucket_obj, arg->rados_completion, &o);
+  completion->release(); /* can't reference arg here, as it might have already been released */
+  if (ret >= 0) {
+	if (op == CLS_RGW_OP_ADD) {
 #if 0
   ldout(cct, 0) << "obj.key.name: " << obj.key.name << dendl;
   ldout(cct, 0) << "obj.key.instance: " << obj.key.instance << dendl;
@@ -9486,11 +9500,11 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   //ldout(cct, 0) << "pending_map: " <<  << dendl;
   //ldout(cct, 0) << "versioned_epoch: " << << dendl;
 #endif
-  if (obj_meta) {
-    int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags);
-    if (r == 0) {
-	  bufferlist bl;
-	  encode(obj_meta->get_combine_meta(), bl);
+      if (obj_meta) {
+        int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags);
+        if (r == 0) {
+	      bufferlist bl;
+	      encode(obj_meta->get_combine_meta(), bl);
 #if 0
 	map<string, bufferlist> m1 = obj_meta->get_combine_meta();
 	ldout(cct, 0) << "test assignmemt: " << dendl;
@@ -9509,26 +9523,40 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  }
 	}
 #endif
-	  string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
-	  obj_meta->insert_to_kv(absolute_name, bl);
-	  operateKV->queue(obj_meta->get_objmeta_kv());
+	      string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
+	      obj_meta->insert_to_kv(absolute_name, bl);
+	      operateKV->queue("KV_ADD", absolute_name, obj_meta->get_objmeta_kv());
 
-	  if (use_obj_meta_cache) {
-		ceph_assert(obj_meta_cache);
-	    ObjMetaCacheInfo info;
-	    info.objmeta_kv = obj_meta->get_objmeta_kv();
-	    info.size = ent.meta.size;
-	    info.mtime = ent.meta.mtime;
-	    obj_meta_cache->put(absolute_name, info);
+	      if (use_obj_meta_cache) {
+	  	    ceph_assert(obj_meta_cache);
+	        ObjMetaCacheInfo info;
+	        info.objmeta_kv = obj_meta->get_objmeta_kv();
+	        info.size = ent.meta.size;
+	        info.mtime = ent.meta.mtime;
+	        obj_meta_cache->put(absolute_name, info);
+	      }
+        }
+      }
+	} else if (op == CLS_RGW_OP_CANCEL) {
+	  // not need. operateKV Must success or Must fail.
+	  ldout(cct, 10) << "XXXXXXXXX not complete!" << dendl;
+	} else if (op == CLS_RGW_OP_DEL) {
+	  if (obj_meta) {
+		string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
+		map<string, bufferlist> empty_m;
+		operateKV->queue("KV_DEL", absolute_name, empty_m);
+		
+		if (use_obj_meta_cache) {
+		  ceph_assert(obj_meta_cache);
+		  if (obj_meta_cache->remove(absolute_name)) {
+			ldout(cct, 10) << "removing " << absolute_name << " from obj meta cache lru success!" << dendl;
+		  } else {
+			ldout(cct, 10) << "removing " << absolute_name << " from obj meta cache lru failed!" << dendl;
+		  }
+		}
 	  }
-    }
+	}
   }
-  complete_op_data *arg;
-  index_completion_manager->create_completion(obj, op, tag, ver, key, dir_meta, remove_objs,
-                                              svc.zone->get_zone().log_data, bilog_flags, &zones_trace, &arg);
-  librados::AioCompletion *completion = arg->rados_completion;
-  int ret = bs.index_ctx.aio_operate(bs.bucket_obj, arg->rados_completion, &o);
-  completion->release(); /* can't reference arg here, as it might have already been released */
   return ret;
 }
 
@@ -9605,14 +9633,14 @@ int RGWRados::cls_obj_complete_del(BucketShard& bs, string& tag,
                                    real_time& removed_mtime,
                                    list<rgw_obj_index_key> *remove_objs,
                                    uint16_t bilog_flags,
-                                   rgw_zone_set *zones_trace)
+                                   rgw_zone_set *zones_trace, RGW_ObjMeta *obj_meta)
 {
   rgw_bucket_dir_entry ent;
   ent.meta.mtime = removed_mtime;
   obj.key.get_index_key(&ent.key);
   return cls_obj_complete_op(bs, obj, CLS_RGW_OP_DEL, tag, pool, epoch,
 			     ent, RGWObjCategory::None, remove_objs,
-			     bilog_flags, zones_trace);
+			     bilog_flags, zones_trace, obj_meta);
 }
 
 int RGWRados::cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace)

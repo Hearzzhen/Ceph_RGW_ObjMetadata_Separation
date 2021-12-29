@@ -4756,7 +4756,7 @@ void RGWDeleteObj::execute()
       del_op.params.unmod_since = unmod_since;
       del_op.params.high_precision_time = s->system_request; /* system request uses high precision time */
 
-      op_ret = del_op.delete_obj();
+      op_ret = del_op.delete_obj(true);
       if (op_ret >= 0) {
         delete_marker = del_op.result.delete_marker;
         version_id = del_op.result.version_id;
@@ -6486,7 +6486,7 @@ void RGWDeleteMultiObj::execute()
     del_op.params.versioning_status = s->bucket_info.versioning_status();
     del_op.params.obj_owner = s->owner;
 
-    op_ret = del_op.delete_obj();
+    op_ret = del_op.delete_obj(true);
     if (op_ret == -ENOENT) {
       op_ret = 0;
     }
