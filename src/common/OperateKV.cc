@@ -121,6 +121,9 @@ map<string, bufferlist> OperateKV::getKV(const std::string& obj_name) {
   struct KV_s kv_s;
   kv_s = tikvClientOperate->Get(convert_obj_name);
   if (kv_s.v != "") {
+	if ((kv_s.v == "parent_dir") || (kv_s.v == "head") || (kv_s.v == "tail")) {
+	  return meta_map;
+	}
     bufferlist out;
     out.append(kv_s.v);
     decode(meta_map, out);
