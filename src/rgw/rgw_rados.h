@@ -2017,7 +2017,7 @@ public:
                string *ptag,
                string *petag,
                void (*progress_cb)(off_t, void *),
-               void *progress_data);
+               void *progress_data, bool need_put_to_tikv = false);
 
   int copy_obj_data(RGWObjectCtx& obj_ctx,
                RGWBucketInfo& dest_bucket_info,

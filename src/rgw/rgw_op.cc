@@ -5119,7 +5119,7 @@ void RGWCopyObj::execute()
 			   (version_id.empty() ? NULL : &version_id),
 			   &s->req_id, /* use req_id as tag */
 			   &etag,
-			   copy_obj_progress_cb, (void *)this
+			   copy_obj_progress_cb, (void *)this, true
     );
 
   const auto ret = rgw::notify::publish(s, s->object, s->obj_size, mtime, etag, rgw::notify::ObjectCreatedCopy, store);

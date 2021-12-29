@@ -5367,7 +5367,7 @@ int RGWRados::copy_obj(RGWObjectCtx& obj_ctx,
                string *ptag,
                string *petag,
                void (*progress_cb)(off_t, void *),
-               void *progress_data)
+               void *progress_data, bool need_put_to_tikv)
 {
   int ret;
   uint64_t obj_size;
@@ -5390,7 +5390,7 @@ int RGWRados::copy_obj(RGWObjectCtx& obj_ctx,
     return -EINVAL;
   }
 
-  ldout(cct, 5) << "Copy object " << src_obj.bucket << ":" << src_obj.get_oid() << " => " << dest_obj.bucket << ":" << dest_obj.get_oid() << dendl;
+  ldout(cct, 5) << "Copy object " << src_obj.bucket << ":" << src_obj.get_oid() << " => " << dest_obj.bucket << ":" << dest_obj.get_oid() << " need_to_put_tikv: " << (need_put_to_tikv ? "true" : "false") << dendl;
 
   if (remote_src || !source_zone.empty()) {
     return fetch_remote_obj(obj_ctx, user_id, info, source_zone,
@@ -5605,7 +5605,7 @@ int RGWRados::copy_obj(RGWObjectCtx& obj_ctx,
   write_op.meta.delete_at = delete_at;
   write_op.meta.modify_tail = !copy_itself;
 
-  ret = write_op.write_meta(obj_size, astate->accounted_size, attrs);
+  ret = write_op.write_meta(obj_size, astate->accounted_size, attrs, need_put_to_tikv);
   if (ret < 0) {
     goto done_ret;
   }
@@ -8754,17 +8754,13 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 		} else {
 	      ldout(cct, 10) << "Read xattr in obj_meta_cache has no found! Turn to get in tikv for oid: " << obj.oid << dendl;
 		}
-	    unfiltered_attrset = operateKV->getKV(robj_name);
+		unfiltered_attrset = operateKV->getKV(robj_name);
 	    if (unfiltered_attrset.empty()) {
 		  ldout(cct, 10) << "Cannot find any data in tikv! Turn to osd to find!" << dendl;
 		  op.getxattrs(&unfiltered_attrset, NULL);
 	    }
 	  } else if (res == 0) {
-		for (auto &it : info.objmeta_kv) {
-		  if (it.first == robj_name) {
-			decode(unfiltered_attrset, it.second);
-		  }
-		}
+		unfiltered_attrset = info.objmeta_kv;
 #if 0
 		ldout(cct, 0) << "test get lru decode: " << dendl;
 		map<string, bufferlist> m2 = unfiltered_attrset;
@@ -8821,7 +8817,7 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 	ldout(cct, 10) << "use the object meta cache, but lru not found: " << absolute_name << "! adding to lru list!" << dendl;
 	ceph_assert(obj_meta_cache);
     ObjMetaCacheInfo putInfo;
-	putInfo.objmeta_kv = *attrs;
+	putInfo.objmeta_kv = unfiltered_attrset;
 	putInfo.size = *psize;
 	putInfo.mtime = *pmtime;
 	obj_meta_cache->put(absolute_name, putInfo);
@@ -9957,6 +9953,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   //ldout(cct, 0) << "versioned_epoch: " << << dendl;
 #endif
       if (obj_meta) {
+		map<string, bufferlist> raw_map = obj_meta->get_combine_meta();
         int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags);
         if (r == 0) {
 	      bufferlist bl;
@@ -9986,7 +9983,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	      if (use_obj_meta_cache) {
 	  	    ceph_assert(obj_meta_cache);
 	        ObjMetaCacheInfo info;
-	        info.objmeta_kv = obj_meta->get_objmeta_kv();
+	        info.objmeta_kv = raw_map;
 	        info.size = ent.meta.size;
 	        info.mtime = ent.meta.mtime;
 	        obj_meta_cache->put(absolute_name, info);
