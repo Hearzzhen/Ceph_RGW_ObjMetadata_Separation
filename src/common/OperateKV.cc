@@ -228,6 +228,14 @@ void *OperateKV::operateKV_thread_entry() {
 		  } else {
 			ldout(cct, 10) << "delete " << del_name << " success!" << dendl;
 		  }
+		} else if (qom.op == KV_DEL_BUCKET) {
+		  string del_name = qom.name;
+		  int del_ret = tikvClientOperate->DelKey(del_name);
+		  if (del_ret != 0) {
+			ldout(cct, 10) << "delete bucket: " << del_name << " failed!" << dendl;
+		  } else {
+			ldout(cct, 10) << "delete bucket: " << del_name << " success!" << dendl;
+		  }
 		}
 	  }
 	  

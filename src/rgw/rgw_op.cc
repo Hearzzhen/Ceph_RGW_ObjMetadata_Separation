@@ -3421,6 +3421,17 @@ void RGWDeleteBucket::execute()
       ldpp_dout(this, 0) << "WARNING: failed to unlink bucket: ret=" << op_ret
 		       << dendl;
     }
+
+	OperateKV *operateKV = store->get_operateKV();
+	if (operateKV) {
+	  string bucket_name_head = "/" + s->bucket_info.bucket.name + "/-";
+	  string bucket_name_tail = "/" + s->bucket_info.bucket.name + "/~";
+	  map<string, bufferlist> empty_m;
+	  operateKV->queue("KV_DEL_BUCKET", bucket_name_head, empty_m);
+	  operateKV->queue("KV_DEL_BUCKET", bucket_name_tail, empty_m);
+	  ldpp_dout(this, 20) << "delete bucket from tikv: " << bucket_name_head << dendl;
+	  ldpp_dout(this, 20) << "delete bucket from tikv: " << bucket_name_tail << dendl;
+	}
   }
 }
 

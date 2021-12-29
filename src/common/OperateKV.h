@@ -17,6 +17,7 @@ class CephContext;
 enum OperateKVOp {
   KV_ADD = 0,
   KV_DEL = 1,
+  KV_DEL_BUCKET = 2,
 };
 
 struct queue_op_map {
@@ -62,6 +63,9 @@ public:
 	  qom.queue_map = m;
 	} else if (opname == "KV_DEL") {
 	  qom.op = KV_DEL;
+	  qom.name = name;
+	} else if (opname == "KV_DEL_BUCKET") {
+	  qom.op = KV_DEL_BUCKET;
 	  qom.name = name;
 	}
 	operateKV_queue.push_back(qom);
