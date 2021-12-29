@@ -1489,31 +1489,34 @@ public:
       }
     }
     lsubdout(cct, rgw, 0) << "marker = " << marker << dendl;
-    s_max = 1;
-    if (!marker.name.empty()) {
-      if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), marker.name) != saveMax_G.marker.end()) {
-      //find the marker in saveMax_G, it's must be a file.
-        if (saveMax_G.save_max != 0) {
-          s_max = saveMax_G.save_max;
+	if (!_cct->_conf->rgw_enable_tikv) {
+      s_max = 1;
+      if (!marker.name.empty()) {
+        if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), marker.name) != saveMax_G.marker.end()) {
+        //find the marker in saveMax_G, it's must be a file.
+          if (saveMax_G.save_max != 0) {
+            s_max = saveMax_G.save_max;
+          }
+          lsubdout(cct, rgw, 20) << "find marker in saveMax_G! s_max = " << s_max << dendl;
+        } else {
+          //not find marker in saveMax_G
+          std::string marker_t = marker.name + "/";
+	      if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), marker_t) == saveMax_G.marker.end()) {
+	        //not sure, set s_max 1.
+	        s_max = 1;
+	        lsubdout(cct, rgw, 20) << "Not find marker in saveMax_G! And cur_marker is not a directory, s_max = 1" << dendl;
+	      } else {
+	        //must be a dir.
+	        s_max = 1;
+	        marker.name += "/ ";
+	        lsubdout(cct, rgw, 20) << "Not find marker in saveMax_G! And cur_marker is a directory, s_max = 1" << dendl;
+	      }
         }
-        lsubdout(cct, rgw, 20) << "find marker in saveMax_G! s_max = " << s_max << dendl;
-      } else {
-        //not find marker in saveMax_G
-        std::string marker_t = marker.name + "/";
-	if (find(saveMax_G.marker.begin(), saveMax_G.marker.end(), marker_t) == saveMax_G.marker.end()) {
-	  //not sure, set s_max 1.
-	  s_max = 1;
-	  lsubdout(cct, rgw, 20) << "Not find marker in saveMax_G! And cur_marker is not a directory, s_max = 1" << dendl;
-	} else {
-	  //must be a dir.
-	  s_max = 1;
-	  marker.name += "/ ";
-	  lsubdout(cct, rgw, 20) << "Not find marker in saveMax_G! And cur_marker is a directory, s_max = 1" << dendl;
-	}
       }
-    }
-
-    default_max = s_max; // XXX was being omitted
+      default_max = s_max; // XXX was being omitted
+	} else {
+	  default_max = _cct->_conf->rgw_list_bucket_min_readahead; // default 1000
+	}
     
     op = this;
   }

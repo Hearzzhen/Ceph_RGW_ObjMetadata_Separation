@@ -103,6 +103,16 @@ bool OperateKV::has_inserted(std::string& head_str) {
   }
 }
 
+void OperateKV::delete_dir_cache(std::string& head_str) {
+  int get_res = obj_dir_cache->get(head_str);
+  if (-ENOENT == get_res) {
+	ldout(cct, 10) << "not found " << head_str << " in dir cache, no need to delete." << dendl;
+  } else {
+	ldout(cct, 10) << "found " << head_str << " in dir cache, need delete it." << dendl;
+	obj_dir_cache->remove(head_str);
+  }
+}
+
 map<string, bufferlist> OperateKV::getKV(const std::string& obj_name) {
   map<string, bufferlist> meta_map;
   string convert_obj_name;
@@ -220,8 +230,8 @@ void *OperateKV::operateKV_thread_entry() {
 			      string b_to_s = string(j.second.to_str());
 			      args1.emplace(pair<string, string>(m_name, b_to_s));
 			    }
-			    ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
 			    tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
+			    ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
 			  } else {
 			    if (has_inserted(_str)) {
 				  continue;
@@ -248,11 +258,16 @@ void *OperateKV::operateKV_thread_entry() {
 			  while ((bucket_name != parent_dir) && (parent_dir_check(parent_dir)) && (del_ret == 0)) {
 			    string dir_name;
 			    find_myself(parent_dir, dir_name);
-			    del_ret = tikvClientOperate->DelKey(parent_dir + "-");
-			    del_ret = tikvClientOperate->DelKey(parent_dir + "~");
+				string head_dir = parent_dir + "-";
+				string tail_dir = parent_dir + "~";
+			    del_ret = tikvClientOperate->DelKey(head_dir);
+			    del_ret = tikvClientOperate->DelKey(tail_dir);
 			    del_ret = tikvClientOperate->DelKey(dir_name);
 			    if (del_ret == 0) {
 				  ldout(cct, 10) << "delete " << parent_dir << " success!" << dendl;
+				  delete_dir_cache(head_dir);
+				  delete_dir_cache(tail_dir);
+				  delete_dir_cache(dir_name);
 			    } else {
 				  ldout(cct, 10) << "delete " << parent_dir << " failed!" << dendl;
 			    }

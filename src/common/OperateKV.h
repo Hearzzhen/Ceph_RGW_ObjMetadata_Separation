@@ -108,6 +108,7 @@ public:
   map<string, bufferlist> getKV(const std::string& obj_name);
   void find_myself(const string& input, string& self);
   bool parent_dir_check(const string& parent_dir);
+  void delete_dir_cache(std::string& head_str);
   map<string, string> scanKV(const string& cur_prefix, int limit);
 };
 

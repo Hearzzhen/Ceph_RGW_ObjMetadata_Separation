@@ -511,7 +511,9 @@ namespace rgw {
 					 g_conf()->rgw_enable_lc_threads,
 					 g_conf()->rgw_enable_quota_threads,
 					 g_conf()->rgw_run_sync_thread,
-					 g_conf().get_val<bool>("rgw_dynamic_resharding"));
+					 g_conf().get_val<bool>("rgw_dynamic_resharding"),
+					 g_conf()->rgw_cache_enabled,
+					 g_conf()->rgw_obj_meta_cache_enabled);
 
     if (!store) {
       mutex.Lock();

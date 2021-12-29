@@ -6598,6 +6598,7 @@ int RGWRados::get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket
     s->shadow_obj[bl.length()] = '\0';
   }
   s->obj_tag = s->attrset[RGW_ATTR_ID_TAG];
+  dout(0) << "--------------------------------- id_tag = " << s->obj_tag.c_str() << dendl;
   auto ttiter = s->attrset.find(RGW_ATTR_TAIL_TAG);
   if (ttiter != s->attrset.end()) {
     s->tail_tag = s->attrset[RGW_ATTR_TAIL_TAG];
@@ -7027,6 +7028,9 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
 	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap(name, bl);
 	  ldout(cct, 0) << "(set_attrs) obj_meta set " << name << dendl;
+	  if (name == "user.rgw.idtag") {
+		ldout(cct, 0) << "------------- idtag: " << bl.to_str() << dendl;
+	  }
 	}
 
     if (name.compare(RGW_ATTR_DELETE_AT) == 0) {
@@ -7068,6 +7072,7 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
 	  ceph_assert(obj_meta);
 	  obj_meta->insert_to_metamap("user.rgw.idtag", bl);
 	  ldout(cct, 0) << "(set_attrs) obj_meta set user.rgw.idtag" << dendl;
+	  ldout(cct, 0) << "----------- if(state) id_tag: " << bl.to_str() << dendl;
 	}
   }
 
@@ -7118,7 +7123,9 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
     auto iter = state->attrset.find(RGW_ATTR_ID_TAG);
     if (iter != state->attrset.end()) {
       iter->second = state->obj_tag;
+	  ldout(cct, 0) << "----------- found id_tag: " << iter->second.to_str() << dendl;
     }
+	ldout(cct, 0) << "----------- not found id_tag in attrset " << dendl;
   }
 
   return 0;
@@ -8779,25 +8786,44 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 	      ldout(cct, 10) << "Read xattr in obj_meta_cache has no found! Turn to get in tikv for oid: " << obj.oid << dendl;
 		}
 		unfiltered_attrset = operateKV->getKV(robj_name);
+#if 1
+		ldout(cct, 0) << "++++++++++++++ test get tikv decode: name: " << robj_name << dendl;
+		map<string, bufferlist> m3 = unfiltered_attrset;
+		for (auto &p : m3) {
+		  ldout(cct, 0) << "++++++++ " << p.first << dendl;
+		  if (p.first == "user.rgw.etag") {
+			string t = p.second.to_str();
+			ldout(cct, 0) << "when user.rgw.etag, v = " << t << dendl;
+		  }
+		  if (p.first == "user.rgw.idtag") {
+			string t = p.second.to_str();
+			ldout(cct, 0) << "when user.rgw.idtag, v = " << t << dendl;
+		  }
+		}
+#endif
 	    if (unfiltered_attrset.empty()) {
 		  ldout(cct, 10) << "Cannot find any data in tikv! Turn to osd to find!" << dendl;
 		  op.getxattrs(&unfiltered_attrset, NULL);
 	    }
 	  } else if (res == 0) {
 		unfiltered_attrset = info.objmeta_kv;
-#if 0
-		ldout(cct, 0) << "test get lru decode: " << dendl;
+#if 1
+		ldout(cct, 0) << "test get lru decode: name: " << robj_name << dendl;
 		map<string, bufferlist> m2 = unfiltered_attrset;
 		for (auto &p : m2) {
 		  ldout(cct, 0) << p.first << dendl;
-		  if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
-		    string t = p.second.to_str();
-			ldout(cct, 0) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
-		  }
-		  if (p.first == "omapvals") {
-			obj_omap oo_1;
-			decode(oo_1, p.second);
-			ldout(cct, 0) << "when omapvals mtime = " << oo_1.meta.mtime << dendl;
+		  //if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
+		  //  string t = p.second.to_str();
+		  //  ldout(cct, 0) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
+		  //}
+		  //if (p.first == "omapvals") {
+		  //obj_omap oo_1;
+		  //decode(oo_1, p.second);
+		  //ldout(cct, 0) << "when omapvals mtime = " << oo_1.meta.mtime << dendl;
+		  //}
+		  if (p.first == "user.rgw.etag") {
+			string t = p.second.to_str();
+			ldout(cct, 0) << "when user.rgw.etag, v = " << t << dendl;
 		  }
 		}
 #endif
@@ -9982,26 +10008,35 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
         if (r == 0) {
 	      bufferlist bl;
 	      encode(obj_meta->get_combine_meta(), bl);
-#if 0
+#if 1
 	map<string, bufferlist> m1 = obj_meta->get_combine_meta();
 	ldout(cct, 0) << "test assignmemt: " << dendl;
 	for (auto &p : m1) {
 	  ldout(cct, 0) << p.first << dendl;
 	}
 
-	ldout(cct, 0) << "test decode: " << dendl;
+	ldout(cct, 0) << "++++++++++ test decode: " << dendl;
 	map<string, bufferlist> m2;
 	decode(m2, bl);
 	for (auto &p : m2) {
 	  ldout(cct, 0) << p.first << dendl;
-	  if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
+	  //if (p.first == "user.rgw.x-amz-meta-s3cmd-attrs") {
+	  //string t = p.second.to_str();
+	  //ldout(cct, 0) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
+	  //}
+	  if (p.first == "user.rgw.etag") {
 		string t = p.second.to_str();
-		ldout(cct, 0) << "when user.rgw.x-amz-meta-s3cmd-attrs, v = " << t << dendl;
+		ldout(cct, 0) << "when user.rgw.etag, v = " << t << dendl;
+	  }
+	  if (p.first == "user.rgw.idtag") {
+		string t = p.second.to_str();
+		ldout(cct, 0) << "when user.rgw.idtag, v = " << t << dendl;
 	  }
 	}
 #endif
 	      string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
 	      obj_meta->insert_to_kv(absolute_name, bl);
+		  ldout(cct, 0) << "------------ " << absolute_name << " is ready to insert tikv queue!" << dendl; 
 	      operateKV->queue("KV_ADD", absolute_name, obj_meta->get_objmeta_kv());
 
 	      if (use_obj_meta_cache) {

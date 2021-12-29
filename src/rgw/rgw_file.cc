@@ -977,6 +977,9 @@ namespace rgw {
 
     rgw_fh->encode_attrs(ux_key, ux_attrs);
 
+	req.emplace_attr(RGW_ATTR_ETAG, std::move(rgw_fh->etag));
+	req.emplace_attr(RGW_ATTR_ACL, std::move(rgw_fh->acls));
+
     req.emplace_attr(RGW_ATTR_UNIX_KEY1, std::move(ux_key));
     req.emplace_attr(RGW_ATTR_UNIX1, std::move(ux_attrs));
 

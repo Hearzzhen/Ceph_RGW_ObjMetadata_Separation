@@ -7362,6 +7362,13 @@ void RGWSetAttrs::execute()
   if (!s->object.empty()) {
     store->set_atomic(s->obj_ctx, obj);
     op_ret = store->set_attrs(s->obj_ctx, s->bucket_info, obj, attrs, nullptr, true);
+	for (auto &p : attrs) {
+	  ldpp_dout(this, 0) << "SETATTRS +++ " << p.first << dendl;
+	  if (p.first == "user.rgw.etag") {
+		string t = p.second.to_str();
+		ldpp_dout(this, 0) << "SETATTRS +++ when user.rgw.etag: v = " << dendl;
+	  }
+	}
   } else {
     for (auto& iter : attrs) {
       s->bucket_attrs[iter.first] = std::move(iter.second);
