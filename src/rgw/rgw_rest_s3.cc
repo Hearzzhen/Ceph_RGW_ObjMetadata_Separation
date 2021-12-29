@@ -3568,8 +3568,16 @@ RGWOp *RGWHandler_REST_Bucket_S3::get_obj_op(bool get_data)
     if (!cur_marker.name.empty() && cur_marker.name[cur_marker.name.size() - 1] != '/') {
       s_max = 1000;
       ldpp_dout(s, 10) << __func__ << " not find marker in saveMax_G! And cur_marker is not a directory, s_max = 1000" << dendl;
-    }
-    ldpp_dout(s, 10) << __func__ << " not find marker in saveMax_G! And cur_marker is a directory, s_max = 1" << dendl;
+    } else if (cur_marker.name.empty()) {
+	  bool is_delimiter = s->info.args.exists("delimiter");
+	  if (!is_delimiter) {
+		s_max = s->cct->_conf->rgw_list_bucket_min_readahead; //default 1000
+		ldpp_dout(s, 10) << __func__ << " query string has not include delimiter. set s_max = " << s_max << dendl;
+	  } else {
+		s_max = 1;
+        ldpp_dout(s, 10) << __func__ << " not find marker in saveMax_G! And cur_marker is a directory, delimiter = " << s->info.args.get("delimiter") << " s_max = 1" << dendl;
+	  }
+	}
   }
 
 

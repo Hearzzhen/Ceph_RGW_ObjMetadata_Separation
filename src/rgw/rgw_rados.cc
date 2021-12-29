@@ -2507,10 +2507,18 @@ int RGWRados::Bucket::List::list_objects_ordered(
     if (cur_marker.name.empty()) {
       read_ahead += 1;
       max_items = max + 1;
+      ldout(cct, 20) << "cur_marker is empty(read first), but param delim is not empty, delim = " << params.delim << " max == MIN(1), read_ahead = 2, max_items = 2" << dendl;
+	  if (params.delim.empty()) {
+		max = cct->_conf->rgw_list_bucket_min_readahead;
+		read_ahead = max;
+		save_max = max;
+		max_items = max;
+		ldout(cct, 20) << "cur_marker is empty(read first), and param delim is empty, max = read_ahead = max_items = " << cct->_conf->rgw_list_bucket_min_readahead << dendl;
+	  }
     } else {
       max_items = cct->_conf->rgw_list_bucket_min_readahead;
+	  ldout(cct, 20) << "cur_marker is not empty(not read first), and cur_marker is a directory. max = MIN(1), read_ahead = MIN(1), max_items = " << cct->_conf->rgw_list_bucket_min_readahead << dendl;
     }
-    ldout(cct, 20) << "max == MIN" << dendl;
   } else if (!cur_marker.name.empty()) {
     //read file
     if (save_max == READ_MIN) {
@@ -2520,26 +2528,26 @@ int RGWRados::Bucket::List::list_objects_ordered(
         read_ahead = max;
         save_max = max;
         max_items = max;
-        ldout(cct, 20) << "max == HUN" << dendl;
+        ldout(cct, 20) << "cur_marker is not empty(not read first), and cur_marker is a file, max == HUN(100), read_ahead = HUN(100), max_items = HUN(100)" << dendl;
       } else {
         max = READ_MIN;
         read_ahead = max + 1;
         save_max = max;
         max_items = cct->_conf->rgw_list_bucket_min_readahead;
-        ldout(cct, 20) << "read not sure, max == MIN" << dendl;
+        ldout(cct, 20) << "cur_marker is not empty, but read not sure, max == MIN(1), read_ahead = 2, max_items = " << cct->_conf->rgw_list_bucket_min_readahead << dendl;
       }
     } else if (save_max == READ_HUN) {
       max = READ_THO;
       read_ahead = max;
       save_max = max;
       max_items = max;
-      ldout(cct, 20) << "max == THO" << dendl;
+      ldout(cct, 20) << "cur_marker is not empty(not read first), and cur_marker is a file, max == THO(1000), read_ahead = THO(1000), max_items = THO(1000)" << dendl;
     } else if (save_max == READ_THO) {
       max = READ_TTH;
       read_ahead = max;
       save_max = max;
       max_items = max;
-      ldout(cct, 20) << "max == TTH" << dendl;
+      ldout(cct, 20) << "cur_marker is not empty(not read first), and cur_marker is a file, max == TTH(10000), read_ahead = TTH(10000), max_items = TTH(10000)" << dendl;
     }
   }
   ldout(cct, 10) << "RGWRados::" << __func__ << " max = " << max << " save_max = " << save_max << " read_ahead = " << read_ahead << dendl;
