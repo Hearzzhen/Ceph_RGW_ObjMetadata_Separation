@@ -127,7 +127,6 @@ set(librgw_common_srcs
   rgw_object_lock.cc
   rgw_rest_iam.cc
   rgw_url.cc
-  rgw_objmeta.cc
   rgw_objmeta_cache.cc)
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)

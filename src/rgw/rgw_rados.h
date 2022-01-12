@@ -1319,7 +1319,7 @@ public:
                quota_handler(NULL),
                cr_registry(NULL),
                meta_mgr(NULL), data_log(NULL), reshard(NULL), 
-			   operateKV(NULL), obj_meta(NULL), obj_meta_cache(NULL) {}
+			   operateKV(NULL), obj_meta_cache(NULL) {}
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;
@@ -1338,10 +1338,6 @@ public:
   RGWRados& set_run_gc_thread(bool _use_gc_thread) {
     use_gc_thread = _use_gc_thread;
     return *this;
-  }
-
-  RGW_ObjMeta *get_obj_meta() {
-	return obj_meta;
   }
 
   OperateKV *get_operateKV() {
@@ -1402,7 +1398,6 @@ public:
   std::shared_ptr<RGWReshardWait> reshard_wait;
 
   OperateKV *operateKV;
-  RGW_ObjMeta *obj_meta;
   ObjMetaCache *obj_meta_cache;
 
   virtual ~RGWRados() = default;
@@ -1533,7 +1528,7 @@ public:
 
     int prepare_atomic_modification(librados::ObjectWriteOperation& op, bool reset_obj, const string *ptag,
                                     const char *ifmatch, const char *ifnomatch, bool removal_op, bool modify_tail, 
-									RGW_ObjMeta *obj_meta = NULL, bool need_put_to_kv = false);
+									RGW_ObjMeta* obj_meta = nullptr, bool need_put_to_kv = false);
     int complete_atomic_modification();
 
   public:
@@ -2252,7 +2247,7 @@ public:
   int put_linked_bucket_info(RGWBucketInfo& info, bool exclusive, ceph::real_time mtime, obj_version *pep_objv,
 			     map<string, bufferlist> *pattrs, bool create_entry_point);
 
-  int set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent, string& tag, uint16_t flags);
+  int set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent, string& tag, uint16_t flags, RGW_ObjMeta* obj_meta);
   int cls_obj_prepare_op(BucketShard& bs, RGWModifyOp op, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModifyOp op, string& tag, int64_t pool, uint64_t epoch,
                           rgw_bucket_dir_entry& ent, RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, 

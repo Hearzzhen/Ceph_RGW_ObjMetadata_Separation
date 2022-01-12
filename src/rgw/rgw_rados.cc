@@ -1370,7 +1370,6 @@ void RGWRados::finalize()
   if (use_obj_meta_cache) {
     delete obj_meta_cache;
   }
-  delete obj_meta;
   operateKV->stop();
   delete operateKV;
 
@@ -1506,8 +1505,6 @@ int RGWRados::init_complete()
   ldout(cct, 0) << "ready to init OperateKV! cct->_conf->rgw_tikv_library_path = " << cct->_conf->rgw_tikv_library_path << dendl;
   operateKV = new OperateKV(cct->_conf->rgw_tikv_library_path, cct);
   operateKV->start();
-  
-  obj_meta = new RGW_ObjMeta(cct); 
   ldout(cct, 0) << "init OperateKV finish!" << dendl;
 
   gc = new RGWGC();
@@ -4191,10 +4188,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   RGWRados::Bucket::UpdateIndex *index_op = static_cast<RGWRados::Bucket::UpdateIndex *>(_index_op);
   RGWRados *store = target->get_store();
 
-  RGW_ObjMeta *obj_meta = nullptr;
-  if (need_put_to_kv) {
-    obj_meta = store->get_obj_meta();
-  }
+  RGW_ObjMeta obj_meta;
 
   ObjectWriteOperation op;
 #ifdef WITH_LTTNG
@@ -4216,6 +4210,11 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   rgw_obj& obj = target->get_obj();
   string obj_name = obj.key.name;
 
+  if (need_put_to_kv) {
+	string absolute_name = "/" + obj.bucket.name + "/" + obj_name;
+	obj_meta.set_obj_name(absolute_name);
+  }
+
   if (obj.get_oid().empty()) {
     ldout(store->ctx(), 0) << "ERROR: " << __func__ << "(): cannot write object with empty name" << dendl;
     return -EIO;
@@ -4234,7 +4233,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   if (!ptag && !index_op->get_optag()->empty()) {
     ptag = index_op->get_optag();
   }
-  r = target->prepare_atomic_modification(op, reset_obj, ptag, meta.if_match, meta.if_nomatch, false, modify_tail, obj_meta, need_put_to_kv);
+  r = target->prepare_atomic_modification(op, reset_obj, ptag, meta.if_match, meta.if_nomatch, false, modify_tail, &obj_meta, need_put_to_kv);
   if (r < 0)
     return r;
 
@@ -4252,8 +4251,8 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
       obj_retention.encode(bl);
       op.setxattr(RGW_ATTR_OBJECT_RETENTION, bl);
 	  if (need_put_to_kv) {
-		ceph_assert(obj_meta);
-		obj_meta->insert_to_metamap("user.rgw.object-retention", bl);
+		ceph_assert(obj_meta.obj_name != "");
+		obj_meta.insert_to_metamap("user.rgw.object-retention", bl);
 		ldout(store->ctx(), 0) << "obj_meta set user.rgw.object-retention" << dendl;
 	  }
     }
@@ -4262,8 +4261,8 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   if (state->is_olh) {
     op.setxattr(RGW_ATTR_OLH_ID_TAG, state->olh_tag);
 	if (need_put_to_kv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap("user.rgw.olh.idtag", state->olh_tag);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap("user.rgw.olh.idtag", state->olh_tag);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.olh.idtag" << dendl;
 	}
   }
@@ -4302,8 +4301,8 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
     encode(*meta.manifest, bl);
     op.setxattr(RGW_ATTR_MANIFEST, bl);
 	if (need_put_to_kv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap("user.rgw.manifest", bl);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap("user.rgw.manifest", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.manifest" << dendl;
 	}
   }
@@ -4317,8 +4316,8 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
 
     op.setxattr(name.c_str(), bl);
 	if (need_put_to_kv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap(name, bl);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap(name, bl);
 	  ldout(store->ctx(), 0) << "obj_meta set " << name << dendl;
 	}
 
@@ -4339,8 +4338,8 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
     encode(store->svc.zone->get_zone_short_id(), bl);
     op.setxattr(RGW_ATTR_SOURCE_ZONE, bl);
 	if (need_put_to_kv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap("user.rgw.source_zone", bl);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap("user.rgw.source_zone", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.source_zone" << dendl;
 	}
   }
@@ -4350,8 +4349,8 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
     bl.append(storage_class);
     op.setxattr(RGW_ATTR_STORAGE_CLASS, bl);
 	if (need_put_to_kv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap("user.rgw.storage_class", bl);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap("user.rgw.storage_class", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.storage_class" << dendl;
 	}
   }
@@ -4433,7 +4432,7 @@ int RGWRados::Object::Write::_do_write_meta(uint64_t size, uint64_t accounted_si
   r = index_op->complete(poolid, epoch, size, accounted_size,
                         meta.set_mtime, etag, content_type,
                         storage_class, &acl_bl,
-                        meta.category, meta.remove_objs, meta.user_data, meta.appendable, obj_meta);
+                        meta.category, meta.remove_objs, meta.user_data, meta.appendable, &obj_meta);
   tracepoint(rgw_rados, complete_exit, req_id.c_str());
   if (r < 0)
     goto done_cancel;
@@ -6197,9 +6196,10 @@ int RGWRados::Object::Delete::delete_obj(bool need_delete_from_tikv, bool multi_
 {
   RGWRados *store = target->get_store();
   rgw_obj& src_obj = target->get_obj();
-  RGW_ObjMeta *obj_meta = nullptr;
+  RGW_ObjMeta obj_meta;
   if (need_delete_from_tikv) {
-	obj_meta = store->get_obj_meta();
+	string absolute_name = "/" + src_obj.bucket.name + "/" + src_obj.key.name;
+	obj_meta.set_obj_name(absolute_name);
   }
   const string& instance = src_obj.key.instance;
   rgw_obj obj = src_obj;
@@ -6365,7 +6365,7 @@ int RGWRados::Object::Delete::delete_obj(bool need_delete_from_tikv, bool multi_
       tombstone_entry entry{*state};
       obj_tombstone_cache->add(obj, entry);
     }
-    r = index_op.complete_del(poolid, ref.ioctx.get_last_version(), state->mtime, params.remove_objs, obj_meta, multi_delete, last_obj);
+    r = index_op.complete_del(poolid, ref.ioctx.get_last_version(), state->mtime, params.remove_objs, &obj_meta, multi_delete, last_obj);
     
     int ret = target->complete_atomic_modification();
     if (ret < 0) {
@@ -6853,7 +6853,7 @@ void RGWRados::Object::invalidate_state()
 
 int RGWRados::Object::prepare_atomic_modification(ObjectWriteOperation& op, bool reset_obj, const string *ptag,
                                                   const char *if_match, const char *if_nomatch, bool removal_op,
-                                                  bool modify_tail, RGW_ObjMeta *obj_meta, bool need_put_to_kv)
+                                                  bool modify_tail, RGW_ObjMeta* obj_meta, bool need_put_to_kv)
 {
   int r = get_state(&state, false);
   if (r < 0)
@@ -6938,14 +6938,14 @@ int RGWRados::Object::prepare_atomic_modification(ObjectWriteOperation& op, bool
 
   op.setxattr(RGW_ATTR_ID_TAG, bl);
   if (need_put_to_kv) {
-	ceph_assert(obj_meta);
+	ceph_assert(obj_meta && obj_meta->obj_name != "");
     obj_meta->insert_to_metamap("user.rgw.idtag", bl);
 	ldout(store->ctx(), 0) << "obj_meta set user.rgw.idtag" << dendl;
   }
   if (modify_tail) {
     op.setxattr(RGW_ATTR_TAIL_TAG, bl);
 	if (need_put_to_kv) {
-	  ceph_assert(obj_meta);
+	  ceph_assert(obj_meta && obj_meta->obj_name != "");
 	  obj_meta->insert_to_metamap("user.rgw.tail_tag", bl);
 	  ldout(store->ctx(), 0) << "obj_meta set user.rgw.tail_tag" << dendl;
 	}
@@ -6997,8 +6997,10 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
     return -ENOENT;
   }
 
+  RGW_ObjMeta obj_meta;
   if (need_put_to_tikv) {
-	obj_meta = get_obj_meta();
+	string ab_name = "/" + obj.bucket.name + "/" + obj.key.name;
+	obj_meta.set_obj_name(ab_name);
   }
   map<string, bufferlist>::iterator iter;
   if (rmattrs) {
@@ -7006,9 +7008,9 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
       const string& name = iter->first;
       op.rmxattr(name.c_str());
 	  if (need_put_to_tikv) {
-		ceph_assert(obj_meta);
+		ceph_assert(obj_meta.obj_name != "");
 		bufferlist bl;
-		obj_meta->insert_to_metamap(name, bl);
+		obj_meta.insert_to_metamap(name, bl);
 		ldout(cct, 0) << "(set_attrs) obj_meta rmattrs: " << name << dendl;
 	  }
     }
@@ -7025,8 +7027,8 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
 
     op.setxattr(name.c_str(), bl);
 	if (need_put_to_tikv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap(name, bl);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap(name, bl);
 	  ldout(cct, 0) << "(set_attrs) obj_meta set " << name << dendl;
 	  if (name == "user.rgw.idtag") {
 		ldout(cct, 0) << "------------- idtag: " << bl.to_str() << dendl;
@@ -7069,8 +7071,8 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
     bl.append(tag.c_str(), tag.size() + 1);
     op.setxattr(RGW_ATTR_ID_TAG,  bl);
 	if (need_put_to_tikv) {
-	  ceph_assert(obj_meta);
-	  obj_meta->insert_to_metamap("user.rgw.idtag", bl);
+	  ceph_assert(obj_meta.obj_name != "");
+	  obj_meta.insert_to_metamap("user.rgw.idtag", bl);
 	  ldout(cct, 0) << "(set_attrs) obj_meta set user.rgw.idtag" << dendl;
 	  ldout(cct, 0) << "----------- if(state) id_tag: " << bl.to_str() << dendl;
 	}
@@ -7097,7 +7099,7 @@ int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& sr
       int64_t poolid = ref.ioctx.get_id();
       r = index_op.complete(poolid, epoch, state->size, state->accounted_size,
                             mtime, etag, content_type, storage_class, &acl_bl,
-                            RGWObjCategory::Main, NULL, nullptr, false, obj_meta);
+                            RGWObjCategory::Main, NULL, nullptr, false, &obj_meta);
     } else {
       int ret = index_op.cancel();
       if (ret < 0) {
@@ -8786,7 +8788,7 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 	      ldout(cct, 10) << "Read xattr in obj_meta_cache has no found! Turn to get in tikv for oid: " << obj.oid << dendl;
 		}
 		unfiltered_attrset = operateKV->getKV(robj_name);
-#if 1
+#if 0
 		ldout(cct, 0) << "++++++++++++++ test get tikv decode: name: " << robj_name << dendl;
 		map<string, bufferlist> m3 = unfiltered_attrset;
 		for (auto &p : m3) {
@@ -8807,7 +8809,7 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
 	    }
 	  } else if (res == 0) {
 		unfiltered_attrset = info.objmeta_kv;
-#if 1
+#if 0
 		ldout(cct, 0) << "test get lru decode: name: " << robj_name << dendl;
 		map<string, bufferlist> m2 = unfiltered_attrset;
 		for (auto &p : m2) {
@@ -9968,7 +9970,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   ver.epoch = epoch;
   cls_rgw_obj_key key(ent.key.name, ent.key.instance);
   cls_rgw_guard_bucket_resharding(o, -ERR_BUSY_RESHARDING);
-  ldout(cct, 0) << "before cls_rgw_bucket_complete_op... obj_meta = " << obj_meta << dendl;
+  ldout(cct, 0) << "before cls_rgw_bucket_complete_op... obj_meta = " << obj_meta << " obj_meta->obj_name = " << obj_meta->obj_name << dendl;
   cls_rgw_bucket_complete_op(o, op, tag, ver, key, dir_meta, remove_objs,
                              svc.zone->get_zone().log_data, bilog_flags, &zones_trace);
   complete_op_data *arg;
@@ -10002,14 +10004,14 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   //ldout(cct, 0) << "pending_map: " <<  << dendl;
   //ldout(cct, 0) << "versioned_epoch: " << << dendl;
 #endif
-      if (obj_meta) {
-		map<string, bufferlist> raw_map = obj_meta->get_combine_meta();
-        int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags);
+      if (obj_meta && (obj_meta->obj_name != "")) {
+		map<string, bufferlist> raw_map = obj_meta->combine_meta;
+        int r = set_obj_omap_to_kv(obj, pool, epoch, ent, tag, bilog_flags, obj_meta);
         if (r == 0) {
 	      bufferlist bl;
-	      encode(obj_meta->get_combine_meta(), bl);
-#if 1
-	map<string, bufferlist> m1 = obj_meta->get_combine_meta();
+		  encode(obj_meta->combine_meta, bl);
+#if 0
+	map<string, bufferlist> m1 = obj_meta->combine_meta;
 	ldout(cct, 0) << "test assignmemt: " << dendl;
 	for (auto &p : m1) {
 	  ldout(cct, 0) << p.first << dendl;
@@ -10034,10 +10036,10 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  }
 	}
 #endif
-	      string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
-	      obj_meta->insert_to_kv(absolute_name, bl);
-		  ldout(cct, 0) << "------------ " << absolute_name << " is ready to insert tikv queue!" << dendl; 
-	      operateKV->queue("KV_ADD", absolute_name, obj_meta->get_objmeta_kv());
+		  map<string, bufferlist> objmeta_kv;
+		  objmeta_kv.emplace(obj_meta->obj_name, bl);
+		  ldout(cct, 0) << "------------ " << obj_meta->obj_name << " is ready to insert tikv queue!" << dendl;
+		  operateKV->queue("KV_ADD", obj_meta->obj_name, objmeta_kv);
 
 	      if (use_obj_meta_cache) {
 	  	    ceph_assert(obj_meta_cache);
@@ -10046,7 +10048,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	        //info.size = ent.meta.size;
 	        info.size = 4194304; //block size(TODO)
 			info.mtime = ent.meta.mtime;
-	        obj_meta_cache->put(absolute_name, info);
+	        obj_meta_cache->put(obj_meta->obj_name, info);
 	      }
         }
       }
@@ -10054,8 +10056,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 	  // not need. operateKV Must success or Must fail.
 	  ldout(cct, 10) << "XXXXXXXXX not complete!" << dendl;
 	} else if (op == CLS_RGW_OP_DEL) {
-	  if (obj_meta) {
-		string absolute_name = "/" + obj.bucket.name + "/" + obj.key.name;
+	  if (obj_meta && (obj_meta->obj_name != "")) {
 		map<string, bufferlist> empty_m;
 		bool delete_flag = false;
 		if (multi_delete) {
@@ -10064,14 +10065,14 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
 			delete_flag = false;
 		  }
 		}
-		operateKV->queue("KV_DEL", absolute_name, empty_m, delete_flag);
+		operateKV->queue("KV_DEL", obj_meta->obj_name, empty_m, delete_flag);
 		
 		if (use_obj_meta_cache) {
 		  ceph_assert(obj_meta_cache);
-		  if (obj_meta_cache->remove(absolute_name)) {
-			ldout(cct, 10) << "removing " << absolute_name << " from obj meta cache lru success!" << dendl;
+		  if (obj_meta_cache->remove(obj_meta->obj_name)) {
+			ldout(cct, 10) << "removing " << obj_meta->obj_name << " from obj meta cache lru success!" << dendl;
 		  } else {
-			ldout(cct, 10) << "removing " << absolute_name << " from obj meta cache lru failed!" << dendl;
+			ldout(cct, 10) << "removing " << obj_meta->obj_name << " from obj meta cache lru failed!" << dendl;
 		  }
 		}
 	  }
@@ -10080,7 +10081,7 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   return ret;
 }
 
-int RGWRados::set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent, string& tag, uint16_t flags) {
+int RGWRados::set_obj_omap_to_kv(const rgw_obj& obj, int64_t pool, uint64_t epoch, rgw_bucket_dir_entry& ent, string& tag, uint16_t flags, RGW_ObjMeta* obj_meta) {
   obj_omap_meta oom;
   oom.category = ent.meta.category;
   oom.size = ent.meta.size;

@@ -111,71 +111,21 @@ struct obj_omap {
 };
 WRITE_CLASS_ENCODER(obj_omap)
 
-class RGW_ObjMeta {
-private:
-  map<std::string, bufferlist> objmeta_kv; //string is dir/obj structure, bufferlist is metadata.
-  map<std::string, bufferlist> combine_meta; //string is xattr like 'user.rgw.xxxx' and omapval named 'omapvals', bufferlist is xattr's value and omap value
-  //OperateKV *operateKV;
+struct RGW_ObjMeta {
+  string obj_name;
+  map<std::string, bufferlist> combine_meta;
 
-  class CephContext *cct;
-public:
-  explicit RGW_ObjMeta(CephContext* _cct);
   explicit RGW_ObjMeta() {}
-  explicit RGW_ObjMeta(const RGW_ObjMeta& _obj_meta) {
-	this->objmeta_kv = _obj_meta.objmeta_kv;
-	this->combine_meta = _obj_meta.combine_meta;
-	//this->operateKV = _obj_meta.operateKV;
+  explicit RGW_ObjMeta(const string& _obj_name) : obj_name(_obj_name) {}
+  ~RGW_ObjMeta() {}
+
+  void set_obj_name(const string& obj_name) {
+	this->obj_name = obj_name;
   }
-  ~RGW_ObjMeta();
-
-  RGW_ObjMeta& operator=(const RGW_ObjMeta& _obj_meta) {
-	this->objmeta_kv = _obj_meta.objmeta_kv;
-	this->combine_meta = _obj_meta.combine_meta;
-	//this->operateKV = _obj_meta.operateKV;
-	return *this;
-  }
-
-  void init();
-  void shutdown();
-  void insert_to_metamap(const std::string& metaname, const bufferlist& metavalue);
-  void insert_to_kv(const std::string& objkey, const bufferlist& combine_metavalue);
-
-  map<std::string, bufferlist>& get_combine_meta() {
-	return combine_meta;
-  }
-
-  map<std::string, bufferlist>& get_objmeta_kv() {
-	return objmeta_kv;
-  }
-
-  void clear_combine_meta() {
-	if (!combine_meta.empty()) {
-	  combine_meta.clear();
-	}
-  }
-
-  void clear_objmeta_kv() {
-	if (!objmeta_kv.empty()) {
-	  objmeta_kv.clear();
-	}
-  }
-
-  void encode(bufferlist &bl) const {
-	ENCODE_START(1, 1, bl);
-	encode(combine_meta, bl);
-	encode(objmeta_kv, bl);
-	ENCODE_FINISH(bl);
-  }
-
-  void decode(bufferlist::const_iterator &bl) {
-	DECODE_START(1, bl);
-	decode(combine_meta, bl);
-	decode(objmeta_kv, bl);
-	DECODE_FINISH(bl);
+  void insert_to_metamap(const std::string& metaname, const bufferlist& metavalue) {
+	combine_meta.insert(pair<std::string, bufferlist>(metaname, metavalue));
   }
 };
-WRITE_CLASS_ENCODER(RGW_ObjMeta)
-
 #undef dout_subsys
 
 #endif

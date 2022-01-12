@@ -63,6 +63,7 @@ public:
 	struct queue_op_map qom;
 	if (opname == "KV_ADD") {
 	  qom.op = KV_ADD;
+	  qom.name = name;
 	  qom.queue_map = m;
 	} else if (opname == "KV_DEL") {
 	  qom.op = KV_DEL;
@@ -82,7 +83,7 @@ public:
   void wait_for_empty();
 
   explicit OperateKV(const string& _library_path, CephContext *_cct) :
-    cct(_cct), operateKV_lock("OperateKV::operateKV_lock"), thread_name("operateKV"),
+    cct(_cct), operateKV_lock(ceph::make_mutex("OperateKV::operateKV_lock")), thread_name("operateKV"),
 	operateKV_stop(false), operateKV_running(false), operateKV_empty_wait(false), operateKV_thread(this), library_path(_library_path) {
 	  tikvClientOperate = new TikvClientOperate(_cct, library_path);
 	  string pd_addr = "10.1.172.118:2379";
