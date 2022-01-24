@@ -7130,6 +7130,14 @@ std::vector<Option> get_rgw_options() {
 	.set_default("/usr/lib64/libtxnkv.so")
 	.set_description("when rgw_enable_tikv true, this is a tikv-clientgo shared library path"),
 
+	Option("rgw_operateKV_queue_timeval", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+	.set_default(0.5)
+	.set_description("when add obj metadata to tikv queue, this is the queue's max timeval, use for batch-write data to tikv"),
+
+	Option("rgw_operateKV_queue_max_size", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+	.set_default(10)
+	.set_description("when add obj metadata to tikv queue, this is queue's max length, use for batch-write data to tikv"),
+
     Option("rgw_rest_getusage_op_compat", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
     .set_description("REST GetUsage request backward compatibility"),

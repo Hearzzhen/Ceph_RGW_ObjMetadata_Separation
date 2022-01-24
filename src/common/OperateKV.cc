@@ -7,6 +7,7 @@
 
 void OperateKV::start() {
   ldout(cct, 10) << __func__ << dendl;
+  timer.init();
   operateKV_thread.create(thread_name.c_str());
 }
 
@@ -17,6 +18,9 @@ void OperateKV::stop() {
   operateKV_cond.notify_all();
   operateKV_lock.unlock();
   operateKV_thread.join();
+  vec_lock.Lock();
+  timer.shutdown();
+  vec_lock.Unlock();
   ldout(cct, 10) << __func__ << " finish." << dendl;
 }
 
@@ -188,59 +192,125 @@ void *OperateKV::operateKV_thread_entry() {
 		queue_op_map qom = p;
 		if (qom.op == KV_ADD) {
 		  //extract obj name, and determine the relationship.
-		  map<std::string, bufferlist> objmeta_map = qom.queue_map;
-		  map<std::string, bufferlist>::iterator iter = objmeta_map.begin();
-		  string obj_name = iter->first;
-		  string self;
-		  find_myself(obj_name, self);
-		  vector<string> extract_res;
-		  extract_res = extract(obj_name);
-		  //TODO: extract result should log into LRU or other data structure, avoid to insert to tikv twice and more.
-		  for (auto &i : extract_res) {
-		    string _str = i;
-		    if (_str[_str.length() - 1] == '-') {
-			  if (has_inserted(_str)) {
-			    continue;
+		  vector<map<std::string, bufferlist>> batch_v = qom.batch_queue_map;
+		  if (batch_v.size() == 1) {
+		    for (auto v : batch_v) {
+		      map<std::string, bufferlist> objmeta_map = v;
+		      map<std::string, bufferlist>::iterator iter = objmeta_map.begin();
+		      string obj_name = iter->first;
+		      string self;
+		      find_myself(obj_name, self);
+		      vector<string> extract_res;
+		      extract_res = extract(obj_name);
+		      for (auto &i : extract_res) {
+		        string _str = i;
+		        if (_str[_str.length() - 1] == '-') {
+			      if (has_inserted(_str)) {
+			        continue;
+			      }
+			      map<string, string> args;
+			      args.emplace(pair<string, string>(_str, "head"));
+			      tikvClientOperate->Puts(args); //put head dir to tikv.
+			      ldout(cct, 10) << "put head." << dendl;
+			      for (auto &i : args) {
+			        ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
+			      }
+		        } else if (_str[_str.length() - 1] == '~') {
+			      if (has_inserted(_str)) {
+			        continue;
+			      }
+			      map<string, string> args;
+			      args.emplace(pair<string, string>(_str, "tail"));
+			      ldout(cct, 10) << "put tail." << dendl;
+			      tikvClientOperate->Puts(args); //put tail dir to tikv.
+			      for (auto &i : args) {
+			        ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
+			      }
+		        } else {
+			      map<std::string, std::string> args;
+			      if (self == _str) {
+			        for (auto &j : objmeta_map) {
+			          //TODO
+			          string m_name = _str;
+			          string b_to_s = string(j.second.to_str());
+			          args.emplace(pair<string, string>(m_name, b_to_s));
+			        }
+			        tikvClientOperate->Puts(args); //put objmeta to tikv.
+			        ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
+			      } else {
+			        if (has_inserted(_str)) {
+				      continue;
+			        }
+			        args.emplace(pair<string, string>(_str, "parent_dir"));
+			        tikvClientOperate->Puts(args);
+			        ldout(cct, 10) << "put parent dir: " << _str << " to tikv!" << dendl;
+			      }
+		        }
+		      }
+			}
+		  } else {
+			//batch_v.size > 1
+			string last_p_dir_name;
+			vector<map<string, string>> v_kvs;
+			for (auto v : batch_v) {
+			  map<std::string, bufferlist> objmeta_map = v;
+			  map<std::string, bufferlist>::iterator iter = objmeta_map.begin();
+			  string obj_name = iter->first;
+			  string self;
+			  find_myself(obj_name, self);
+			  string p_dir_name;
+			  string t_self = self;
+			  if (self[self.length() - 1] == '/') {
+				string t_self = t_self.substr(0, t_self.length() - 1);
 			  }
-			  map<string, string> args;
-			  args.emplace(pair<string, string>(_str, "head"));
-			  tikvClientOperate->Puts(args);
-			  ldout(cct, 10) << "put head." << dendl;
-			  for (auto &i : args) {
-			    ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
+			  size_t t_pos = t_self.rfind('/');
+			  p_dir_name = t_self.substr(0, t_pos + 1);
+			  if (last_p_dir_name == p_dir_name) {
+				map<std::string, std::string> args;
+				string m_name = self;
+				string b_to_s = string(iter->second.to_str());
+				args.emplace(pair<string, string>(m_name, b_to_s));
+				v_kvs.emplace_back(args);
+				continue;
 			  }
-		    } else if (_str[_str.length() - 1] == '~') {
-			  if (has_inserted(_str)) {
-			    continue;
+			  last_p_dir_name = p_dir_name;
+			  vector<string> extract_res;
+			  extract_res = extract(obj_name);
+			  for (auto &i : extract_res) {
+				string _str = i;
+				if (_str[_str.length() - 1] == '-') {
+				  if (has_inserted(_str)) {
+					continue;
+				  }
+				  map<string, string> args;
+				  args.emplace(pair<string, string>(_str, "head"));
+				  v_kvs.emplace_back(args);
+				} else if (_str[_str.length() - 1] == '~') {
+				  if (has_inserted(_str)) {
+					continue;
+				  }
+				  map<string, string> args;
+				  args.emplace(pair<string, string>(_str, "tail"));
+				  v_kvs.emplace_back(args);
+				} else {
+				  map<std::string, std::string> args;
+				  if (self == _str) {
+					string m_name = _str;
+					string b_to_s = string(iter->second.to_str());
+					args.emplace(pair<string, string>(m_name, b_to_s));
+					v_kvs.emplace_back(args);
+				  } else {
+					if (has_inserted(_str)) {
+					  continue;
+					}
+					args.emplace(pair<string, string>(_str, "parent_dir"));
+					v_kvs.emplace_back(args);
+				  }
+				}
 			  }
-			  map<string, string> args;
-			  args.emplace(pair<string, string>(_str, "tail"));
-			  ldout(cct, 10) << "put tail." << dendl;
-			  tikvClientOperate->Puts(args);
-			  for (auto &i : args) {
-			    ldout(cct, 10) << "key = " << i.first << " val = " << i.second << dendl;
-			  }
-		    } else {
-			  map<std::string, bufferlist> args;
-			  map<std::string, std::string> args1;
-			  if (self == _str) {
-			    for (auto &j : objmeta_map) {
-			      //TODO
-			      string m_name = _str;
-			      string b_to_s = string(j.second.to_str());
-			      args1.emplace(pair<string, string>(m_name, b_to_s));
-			    }
-			    tikvClientOperate->Puts(args1); //need increase the tikv Puts interface
-			    ldout(cct, 10) << "put objmeta: " << _str << " to tikv!" << dendl;
-			  } else {
-			    if (has_inserted(_str)) {
-				  continue;
-			    }
-			    args1.emplace(pair<string, string>(_str, "parent_dir"));
-			    tikvClientOperate->Puts(args1);
-			    ldout(cct, 10) << "put parent dir: " << _str << " to tikv!" << dendl;
-			  }
-		    }
+			}
+			tikvClientOperate->PutsVec(v_kvs);
+			ldout(cct, 10) << "put batch_queue size: " << batch_v.size() << " extract total: " << v_kvs.size() << " into tikv." << dendl;
 		  }
 	    } else if (qom.op == KV_DEL) {
 		  if (!qom.multi_delete) {

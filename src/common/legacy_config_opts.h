@@ -1558,8 +1558,10 @@ OPTION(rgw_crypt_suppress_logs, OPT_BOOL)   // suppress logs that might print cu
 OPTION(rgw_list_bucket_min_readahead, OPT_INT) // minimum number of entries to read from rados for bucket listing
 OPTION(rgw_dir_count, OPT_INT)  // rgw max dir count per read from osd
 
-OPTION(rgw_enable_tikv, OPT_BOOL) //enable rgw metadata separate
-OPTION(rgw_tikv_library_path, OPT_STR) //when rgw metadata separate enabled, the tikv-clientgo shared library path
+OPTION(rgw_enable_tikv, OPT_BOOL) // enable rgw metadata separate
+OPTION(rgw_tikv_library_path, OPT_STR) // when rgw metadata separate enabled, the tikv-clientgo shared library path
+OPTION(rgw_operateKV_queue_timeval, OPT_FLOAT) // add to tikv operateKV queue timeval
+OPTION(rgw_operateKV_queue_max_size, OPT_INT) // add to tikv operateKV queue max length
 
 OPTION(rgw_rest_getusage_op_compat, OPT_BOOL) // dump description of total stats for s3 GetUsage API
 

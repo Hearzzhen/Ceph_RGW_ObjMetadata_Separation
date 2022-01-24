@@ -46,11 +46,11 @@ int TikvClientOperate::Puts(const map<string, string>& args) {
 }
 
 int TikvClientOperate::PutsMap(const map<string, string>& args) {
-  int size = args.size();
+ /* int size = args.size();
   KV_return** kv;
   kv = (KV_return**)malloc(sizeof(KV_return*) * size); 
   map<string, string>::const_iterator iter = args.begin();
-  for (int i = 0; i < size && iter != args.end(); ++i) {
+  for (int i = 0; i < size && iter != args.end(); ++i, ++iter) {
     string temp_k = iter->first;
     string temp_v = iter->second;
     kv[i] = (KV_return*)malloc(sizeof(KV_return));
@@ -83,7 +83,35 @@ int TikvClientOperate::PutsMap(const map<string, string>& args) {
       kv[i] = NULL;
       ldout(cct, 10) << "PutsMap End! Free kv!" << dendl;
     }
+  }*/
+  return 0; 
+}
+
+int TikvClientOperate::PutsVec(const vector<map<string, string>> v) {
+  int size = v.size();
+  vector<map<string, string>>::const_iterator iter = v.begin();
+  KV_set *kv;
+  kv = (KV_set*)malloc(sizeof(KV_set) * size);
+  for (int i = 0; i < size && iter != v.end(); ++i, ++iter) {
+	map<string, string> temp_m = *iter;
+	map<string, string>::const_iterator m_iter = temp_m.begin();
+	GoString temp_k = buildGoString(m_iter->first.c_str(), m_iter->first.size());
+	GoString temp_v = buildGoString(m_iter->second.c_str(), m_iter->second.size());
+	kv[i].k = temp_k;
+	kv[i].v = temp_v;
   }
+  GoInt r = putsKVMap(kv, GoInt(size));
+  if (r == 0) {
+	ldout(cct, 10) << "PutsVec Success!" << dendl;
+  } else {
+	ldout(cct, 10) << "PutsVec Failed!" << dendl;
+  }
+
+  if (kv != 0) {
+	free(kv);
+	kv = NULL;
+  }
+
   return r;
 }
 

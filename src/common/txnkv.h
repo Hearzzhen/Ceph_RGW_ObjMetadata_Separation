@@ -28,6 +28,7 @@ public:
   void initTikvClientOperate(const string& pd_addr);
   int Puts(const map<string, string>& args);
   int PutsMap(const map<string, string>& args);
+  int PutsVec(const vector<map<string, string>> v);
   struct KV_s Get(string& key);
   int DelKey(const string& key);
   int DelKeys(const vector<string>& args);

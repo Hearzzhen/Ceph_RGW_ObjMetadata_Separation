@@ -32,6 +32,11 @@ typedef struct {
 	int vlen;
 } KV_return;
 
+typedef struct {
+	_GoString_ k;
+	_GoString_ v;
+} KV_set;
+
 extern unsigned char* mallocUChar(int size);
 extern void copyUChar(unsigned char* str, unsigned char* v, int len);
 extern KV_return** mallocKVStruct(int limit);
@@ -39,6 +44,8 @@ extern void copyKVStruct(KV_return** kv_return, const unsigned char* k, const un
 extern void FreeKVStruct(KV_return** kv_return, int limit);
 extern char* getKVStructKey(KV_return** kv, int index);
 extern char* getKVStructVal(KV_return** kv, int index);
+extern _GoString_ getKVSetKey(KV_set* kv, int index);
+extern _GoString_ getKVSetVal(KV_set* kv, int index);
 extern char* getKeys(char** keys, int index);
 
 #line 1 "cgo-generated-wrapper"
@@ -97,7 +104,7 @@ extern void initStore(GoString ip_address);
 
 // key1 val1 key2 val2 ...
 extern GoInt putsKV(GoString key, GoString value);
-extern GoInt putsKVMap(KV_return** kv, GoInt size);
+extern GoInt putsKVMap(KV_set* kv, GoInt size);
 
 /* Return type for getKV */
 struct getKV_return {
